@@ -29,8 +29,8 @@ export const userSessions = pgTable('user_sessions', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId : uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   hashedRefreshToken: text('hashed_refresh_token').notNull(),
-  userAgent: text('user_agent').notNull(),
-  ipAdress: inet('ip_address').notNull(),
+  userAgent: text('user_agent'),
+  ipAdress: inet('ip_address'),
 
   expiredAt : timestamp('expried_at',{withTimezone : true}).notNull(),
   createdAt : timestamp('created_at',{withTimezone : true}).defaultNow().notNull(),
