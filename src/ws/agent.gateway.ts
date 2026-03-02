@@ -9,7 +9,6 @@ import {
 } from '@nestjs/websockets';
 import { Server, WebSocket } from 'ws';
 import { Logger, OnModuleInit } from '@nestjs/common';
-import { RedisService } from '../redis/redis.service';
 
 @WebSocketGateway({ path: '/ws/agent' })
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
@@ -18,25 +17,11 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly redisService: RedisService) {}
+  constructor() {}
 
   onModuleInit() {
-    this.redisService.onMessage((_channel, message) => {
-      try {
-        const payload = JSON.parse(message);
-        // broadcast incoming Redis messages to local WS clients
-        const clients = (this.server as any)?.clients as Set<any> | undefined;
-        if (clients) {
-          clients.forEach((client) => {
-            if (client && client.readyState === 1) {
-              client.send(JSON.stringify(payload));
-            }
-          });
-        }
-      } catch (e) {
-        this.logger.error('Error handling redis message', e as any);
-      }
-    });
+    // Redis pub/sub disabled — will be re-enabled when Redis is configured
+    this.logger.log('AgentGateway initialized (Redis pub/sub skipped)');
   }
 
   handleConnection(client: WebSocket) {

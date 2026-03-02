@@ -8,6 +8,13 @@
       "when": 1772456261270,
       "tag": "0000_cynical_blackheart",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772461388083,
+      "tag": "0001_brown_triathlon",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
@@ -10,8 +10,33 @@ export class RedisService implements OnModuleDestroy {
 
   constructor() {
     const url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
-    this.pub = new Redis(url);
-    this.sub = new Redis(url);
+
+    const commonOpts: RedisOptions = {
+      maxRetriesPerRequest: 3,
+      retryStrategy(times) {
+        if (times > 5) return null;           
+        return Math.min(times * 500, 3_000); 
+      },
+      lazyConnect: true,
+    };
+
+    this.pub = new Redis(url, commonOpts);
+    this.sub = new Redis(url, commonOpts);
+
+    this.pub.on('error', (err) => this.logger.warn(`Redis pub error: ${err.message}`));
+    this.sub.on('error', (err) => this.logger.warn(`Redis sub error: ${err.message}`));
+
+    this.connectClients();
+  }
+
+  private async connectClients() {
+    try {
+      await Promise.all([this.pub.connect(), this.sub.connect()]);
+      this.logger.log('Redis clients connected');
+    } catch {
+      this.logger.warn('Redis is unavailable — pub/sub features disabled');
+      return;
+    }
 
     this.sub.on('message', (channel: string, message: string) => {
       if (this.messageHandler) this.messageHandler(channel, message);
