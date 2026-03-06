@@ -69,9 +69,11 @@ export class AuthController {
     return {
       userId: req.user.userId,
       email: req.user.email,
+      name: req.user.name,
       role: req.user.role,
     };
   }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('OWNER')
   @Get('test/owner-only')

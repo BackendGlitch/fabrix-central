@@ -8,7 +8,11 @@ async function bootstrap() {
 
   app.useWebSocketAdapter(new WsAdapter(app));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-  app.enableCors();
+  
+  app.enableCors({
+    origin: 'http://localhost:3000',
+    credentials: true,
+  });
 
   const port = process.env.PORT ?? 4000;
   await app.listen(port);
