@@ -10,8 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
 import { RegisterDto, LoginDto, RefreshDto } from './dto/index.js';
-import { JwtAuthGuard } from './guards/index.js';
-import { RolesGuard } from './guards/index.js';
+import { JwtAuthGuard, RolesGuard } from './guards/index.js';
 import { Roles } from './decorators/index.js';
 
 @Controller('auth')

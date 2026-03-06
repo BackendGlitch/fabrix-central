@@ -1,4 +1,3 @@
-// filepath: c:\Users\belha\Fabrix\fabrix-central\src\auth\decorators\roles.decorator.ts
 import { SetMetadata } from '@nestjs/common';
 
 export type UserRole = 'OWNER' | 'CUSTOMER' | 'ADMIN';
