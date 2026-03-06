@@ -1,1 +1,2 @@
-export {JwtAuthGuard} from './jwt-auth.guard';
+export {JwtAuthGuard} from './jwt-auth.guard.js';
+export {RolesGuard} from './roles.guard.js';
