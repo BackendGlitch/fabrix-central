@@ -11,6 +11,8 @@ import {
 import { AuthService } from './auth.service.js';
 import { RegisterDto, LoginDto, RefreshDto } from './dto/index.js';
 import { JwtAuthGuard } from './guards/index.js';
+import { RolesGuard } from './guards/index.js';
+import { Roles } from './decorators/index.js';
 
 @Controller('auth')
 export class AuthController {
@@ -70,5 +72,32 @@ export class AuthController {
       email: req.user.email,
       role: req.user.role,
     };
+  }
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  @Get('test/owner-only')
+  ownerOnly(@Request() req) {
+    return { message: `Hello Owner ${req.user.email}` };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CUSTOMER')
+  @Get('test/customer-only')
+  customerOnly(@Request() req) {
+    return { message: `Hello Customer ${req.user.email}` };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('test/admin-only')
+  adminOnly(@Request() req) {
+    return { message: `Hello Admin ${req.user.email}` };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER', 'ADMIN')
+  @Get('test/owner-or-admin')
+  ownerOrAdmin(@Request() req) {
+    return { message: `Hello ${req.user.role} ${req.user.email}` };
   }
 }

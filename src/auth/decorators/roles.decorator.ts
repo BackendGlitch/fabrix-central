@@ -1,14 +1,16 @@
+// filepath: c:\Users\belha\Fabrix\fabrix-central\src\auth\decorators\roles.decorator.ts
 import { SetMetadata } from '@nestjs/common';
 
-// This key is used by RolesGuard to read the allowed roles from the route metadata
+export type UserRole = 'OWNER' | 'CUSTOMER' | 'ADMIN';
+
 export const ROLES_KEY = 'roles';
 
 /**
  * Decorator that marks a route as requiring specific roles.
  *
- * Usage:
+ * @example
  *   @Roles('OWNER')              — only owners
  *   @Roles('OWNER', 'ADMIN')     — owners and admins
  *   @Roles('CUSTOMER')           — only customers
  */
-export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
+export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
