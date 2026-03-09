@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { JwtPayload } from './interfaces/index.js';
+import { isUserRole } from './roles.js';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
@@ -16,12 +17,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   validate(payload: JwtPayload) {
-    if (!payload.sub || !payload.role) {
+    if (!payload.sub || !payload.email || !isUserRole(payload.role)) {
       throw new UnauthorizedException('Malformed token');
     }
     return {
       userId: payload.sub,
       email: payload.email,
+      name: payload.name ?? 'User',
       role: payload.role,
     };
   }

@@ -1,4 +1,14 @@
-import {IsEmail, IsEnum, IsNotEmpty, IsString, MinLength} from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+} from 'class-validator';
+import {
+  PUBLIC_REGISTRATION_ROLES,
+  type PublicRegistrationRole,
+} from '../roles.js';
 
 export class RegisterDto {
   @IsEmail()
@@ -12,6 +22,8 @@ export class RegisterDto {
   @IsNotEmpty({message: 'First name is required'})
   name: string;
 
-  @IsEnum(['OWNER','CUSTOMER','ADMIN'   ], {message: 'Role must be either OWNER, CUSTOMER, or ADMIN'})
-  role: 'OWNER' | 'CUSTOMER' | 'ADMIN';
+  @IsIn(PUBLIC_REGISTRATION_ROLES, {
+    message: 'Role must be either OWNER or CUSTOMER',
+  })
+  role: PublicRegistrationRole;
 }
