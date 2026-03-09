@@ -1,1 +1,2 @@
-export { Roles, ROLES_KEY, type UserRole } from './roles.decorator.js';
+export { Roles, ROLES_KEY } from './roles.decorator.js';
+export type { UserRole } from '../roles.js';
