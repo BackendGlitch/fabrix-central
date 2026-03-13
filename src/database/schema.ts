@@ -40,3 +40,22 @@ export const userSessions = pgTable('user_sessions', {
   index('sessions_expired_at_idx').on(table.expiredAt),
 ]);
   
+export const pairingStatusEnum = pgEnum('pairing_status', ['pending', 'approved', 'expired', 'consumed']);
+
+export const agentPairings = pgTable('agent_pairings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  code: varchar('code', { length: 10 }).notNull(),
+  status: pairingStatusEnum('status').default('pending').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  agentName: varchar('agent_name', { length: 255 }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  agentToken: text('agent_token'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex('agent_pairings_code_idx').on(table.code),
+  index('agent_pairings_status_idx').on(table.status),
+  index('agent_pairings_expires_at_idx').on(table.expiresAt),
+  index('agent_pairings_user_id_idx').on(table.userId),
+]);
