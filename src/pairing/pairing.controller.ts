@@ -19,9 +19,10 @@ import {
 } from './dto/index';
 
 interface AuthUser {
-  id: string;
+  userId: string;
   email: string;
   role: string;
+  name: string;
 }
 
 @Controller('agent/pair')
@@ -30,23 +31,18 @@ export class PairingController {
 
   /**
    * POST /agent/pair/start
-   * Start pairing flow - generates pairing code
+   * UNAUTHENTICATED - Desktop app creates pending pairing without owner
    */
   @Post('start')
-  @UseGuards(JwtAuthGuard)
   async startPairing(@Req() req: Request): Promise<StartPairingResponseDto> {
-    const user = req.user as AuthUser;
-    if (!user || !user.id) {
-      throw new BadRequestException('User not authenticated');
-    }
-
-    const agentName = (req.body as any)?.agentName;
-    return this.pairingService.startPairing(user.id, agentName);
+    const body = req.body as any;
+    const agentName = body?.agentName;
+    return this.pairingService.startPairing(agentName);
   }
 
   /**
    * GET /agent/pair/:code/status
-   * Check pairing status - no auth required
+   * PUBLIC - Check pairing status (no auth required)
    */
   @Get(':code/status')
   async getPairingStatus(@Param('code') code: string): Promise<PairingStatusDto> {
@@ -55,27 +51,24 @@ export class PairingController {
 
   /**
    * POST /agent/pair/:code/approve
-   * Approve pairing - OWNER only
+   * OWNER-ONLY - Sets owner_id on the pairing
    */
   @Post(':code/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('OWNER')
-  async approvePairing(
-    @Param('code') code: string,
-    @Req() req: Request,
-  ): Promise<{ message: string }> {
+  async approvePairing(@Param('code') code: string, @Req() req: Request): Promise<{ message: string }> {
     const user = req.user as AuthUser;
-    if (!user || !user.id) {
-      throw new BadRequestException('User not authenticated');
-    }
+if (!user || !user.userId) {
+  throw new BadRequestException('User not authenticated');
+}
 
-    await this.pairingService.approvePairing(code, user.id);
-    return { message: 'Pairing approved successfully' };
+return this.pairingService.approvePairing(code, user.userId);
   }
 
   /**
    * POST /agent/pair/:code/consume
-   * Consume pairing and get agent token - no auth required
+   * PUBLIC - Exchange approved code for standard auth tokens
+   * Response: { accessToken, refreshToken, user }
    */
   @Post(':code/consume')
   async consumePairing(@Param('code') code: string): Promise<ConsumePairingDto> {

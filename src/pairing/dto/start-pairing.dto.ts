@@ -1,5 +1,5 @@
 export class StartPairingResponseDto {
-  code: string;
-  loginUrl: string;
-  expiresAt: Date;
+  pairing_code: string;
+  login_url: string;
+  expires_at: Date;
 }

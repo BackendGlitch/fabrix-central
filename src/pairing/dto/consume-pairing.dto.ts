@@ -1,4 +1,10 @@
 export class ConsumePairingDto {
-  agentToken: string;
-  expiresIn: number; // token expiry in seconds
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  };
 }

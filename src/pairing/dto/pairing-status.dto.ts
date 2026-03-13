@@ -1,7 +1,6 @@
 export class PairingStatusDto {
-  code: string;
   status: 'pending' | 'approved' | 'expired' | 'consumed';
-  expiresAt: Date;
-  approvedAt?: Date;
-  consumedAt?: Date;
+  expires_at: Date;
+  approved_at?: Date;
+  consumed_at?: Date;
 }
