@@ -1,7 +1,8 @@
 export class ConsumePairingDto {
-  accessToken: string;
-  refreshToken: string;
-  user: {
+  status?: 'already_consumed';
+  accessToken?: string;
+  refreshToken?: string;
+  user?: {
     id: string;
     email: string;
     name: string;

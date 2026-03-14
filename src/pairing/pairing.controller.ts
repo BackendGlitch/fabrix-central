@@ -25,6 +25,11 @@ interface AuthUser {
   name: string;
 }
 
+interface RequestMeta {
+  ip?: string;
+  userAgent?: string;
+}
+
 @Controller('agent/pair')
 export class PairingController {
   constructor(private readonly pairingService: PairingService) {}
@@ -37,7 +42,7 @@ export class PairingController {
   async startPairing(@Req() req: Request): Promise<StartPairingResponseDto> {
     const body = req.body as any;
     const agentName = body?.agentName;
-    return this.pairingService.startPairing(agentName);
+    return this.pairingService.startPairing(agentName, this.getRequestMeta(req));
   }
 
   /**
@@ -45,8 +50,11 @@ export class PairingController {
    * PUBLIC - Check pairing status (no auth required)
    */
   @Get(':code/status')
-  async getPairingStatus(@Param('code') code: string): Promise<PairingStatusDto> {
-    return this.pairingService.getPairingStatus(code);
+  async getPairingStatus(
+    @Param('code') code: string,
+    @Req() req: Request,
+  ): Promise<PairingStatusDto> {
+    return this.pairingService.getPairingStatus(code, this.getRequestMeta(req));
   }
 
   /**
@@ -58,11 +66,11 @@ export class PairingController {
   @Roles('OWNER')
   async approvePairing(@Param('code') code: string, @Req() req: Request): Promise<{ message: string }> {
     const user = req.user as AuthUser;
-if (!user || !user.userId) {
-  throw new BadRequestException('User not authenticated');
-}
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
 
-return this.pairingService.approvePairing(code, user.userId);
+    return this.pairingService.approvePairing(code, user.userId, this.getRequestMeta(req));
   }
 
   /**
@@ -71,7 +79,22 @@ return this.pairingService.approvePairing(code, user.userId);
    * Response: { accessToken, refreshToken, user }
    */
   @Post(':code/consume')
-  async consumePairing(@Param('code') code: string): Promise<ConsumePairingDto> {
-    return this.pairingService.consumePairing(code);
+  async consumePairing(
+    @Param('code') code: string,
+    @Req() req: Request,
+  ): Promise<ConsumePairingDto> {
+    return this.pairingService.consumePairing(code, this.getRequestMeta(req));
+  }
+
+  private getRequestMeta(req: Request): RequestMeta {
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const ip = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor?.split(',')[0]?.trim();
+
+    return {
+      ip: ip ?? req.ip,
+      userAgent: req.headers['user-agent'],
+    };
   }
 }

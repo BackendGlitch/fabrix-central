@@ -96,6 +96,34 @@ export class AuthService {
     });
   }
 
+  async issueSessionForUserId(userId: string): Promise<AuthTokens> {
+    const [user] = await this.db.db
+      .select({
+        id: users.id,
+        email: users.email,
+        name: users.name,
+        role: users.role,
+        isActive: users.isActive,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    if (!user.isActive) {
+      throw new ForbiddenException('Account is deactivated');
+    }
+
+    return this.createSession({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+  }
+
   async refresh(refreshToken: string): Promise<AuthTokens> {
     let payload: { jti: string; sub: string };
     try {
