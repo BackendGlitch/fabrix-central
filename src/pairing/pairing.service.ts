@@ -1,19 +1,15 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { eq, and, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 
 import { DatabaseService } from '../database/database.service';
-import { AuthService } from '../auth/auth.service';
-import { agentPairings, agentPairingAudit, userSessions } from '../database/schema';
+import { AgentAuthService } from '../agent-auth/agent-auth.service';
+import { AgentGateway } from '../ws/agent.gateway';
+import { agentPairings, agentPairingAudit, agents, agentSessions } from '../database/schema';
 import {
   StartPairingResponseDto,
+  StartPairingRequestDto,
   PairingStatusDto,
   ConsumePairingDto,
 } from './dto/index';
@@ -29,12 +25,13 @@ interface RequestMeta {
 export class PairingService {
   private readonly logger = new Logger(PairingService.name);
   private readonly PAIRING_EXPIRY_MINUTES = 15;
+  private readonly requestLog = new Map<string, number[]>();
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly auth: AuthService,
+    private readonly agentAuth: AgentAuthService,
+    private readonly agentGateway: AgentGateway,
   ) {}
 
   /**
@@ -48,10 +45,6 @@ export class PairingService {
       code += chars[bytes[i] % chars.length];
     }
     return code;
-  }
-
-  private getRefreshSecret(): string {
-    return this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
   }
 
   private async writeAudit(input: {
@@ -73,14 +66,31 @@ export class PairingService {
     });
   }
 
+  private enforceRateLimit(action: 'start' | 'status' | 'consume', meta?: RequestMeta): void {
+    const ip = (meta?.ip || 'unknown').slice(0, 80);
+    const now = Date.now();
+    const windowMs = 60_000;
+    const limits: Record<typeof action, number> = {
+      start: 30,
+      status: 120,
+      consume: 30,
+    };
+    const key = `${action}:${ip}`;
+    const prev = this.requestLog.get(key) || [];
+    const next = prev.filter((ts) => now - ts < windowMs);
+    if (next.length >= limits[action]) {
+      throw new BadRequestException('Too many requests, please retry shortly');
+    }
+    next.push(now);
+    this.requestLog.set(key, next);
+  }
+
   /**
    * POST /agent/pair/start
    * Unauthenticated - creates pending pairing without owner
    */
-  async startPairing(
-    agentName?: string,
-    meta?: RequestMeta,
-  ): Promise<StartPairingResponseDto> {
+  async startPairing(input: StartPairingRequestDto, meta?: RequestMeta): Promise<StartPairingResponseDto> {
+    this.enforceRateLimit('start', meta);
     let code = this.generateCode();
     const baseUrl =
       this.config.get<string>('AGENT_LOGIN_BASE_URL') || 'http://localhost:3000/agent/auth';
@@ -100,7 +110,10 @@ export class PairingService {
             status: 'pending',
             ownerId: null,
             sessionId: null,
-            agentName,
+            agentId: null,
+            nodeId: input.nodeId?.trim() || null,
+            appVersion: input.appVersion?.trim() || null,
+            agentName: input.agentName?.trim() || null,
             expiresAt,
           })
           .returning({ id: agentPairings.id });
@@ -111,7 +124,11 @@ export class PairingService {
           actorType: 'system',
           actorUserId: null,
           meta,
-          metadata: { agentName },
+          metadata: {
+            nodeId: input.nodeId,
+            agentName: input.agentName,
+            appVersion: input.appVersion,
+          },
         });
 
         break;
@@ -138,6 +155,7 @@ export class PairingService {
    * Check pairing status - no auth required
    */
   async getPairingStatus(code: string, meta?: RequestMeta): Promise<PairingStatusDto> {
+    this.enforceRateLimit('status', meta);
     const pairing = await this.db.db
       .select()
       .from(agentPairings)
@@ -261,120 +279,160 @@ export class PairingService {
    * Idempotent: already-consumed returns { status: 'already_consumed' }
    */
   async consumePairing(code: string, meta?: RequestMeta): Promise<ConsumePairingDto> {
-    const pairing = await this.db.db
-      .select()
-      .from(agentPairings)
-      .where(eq(agentPairings.code, code))
-      .limit(1);
+    this.enforceRateLimit('consume', meta);
+    const result = await this.db.db.transaction(async (tx: any) => {
+      const pairing = await tx
+        .select()
+        .from(agentPairings)
+        .where(eq(agentPairings.code, code))
+        .limit(1);
 
-    if (pairing.length === 0) {
-      throw new NotFoundException('Pairing code not found');
-    }
+      if (pairing.length === 0) {
+        throw new NotFoundException('Pairing code not found');
+      }
 
-    const record = pairing[0];
+      const record = pairing[0];
+      if (record.status === 'consumed') {
+        return { type: 'already_consumed' as const, record };
+      }
+      if (new Date() > record.expiresAt) {
+        await tx
+          .update(agentPairings)
+          .set({ status: 'expired' })
+          .where(eq(agentPairings.code, code));
+        throw new BadRequestException('Pairing code has expired');
+      }
+      if (record.status !== 'approved' || !record.ownerId) {
+        throw new BadRequestException(
+          `Pairing must be approved before consuming. Current status: ${record.status}`,
+        );
+      }
 
-    if (record.status === 'consumed') {
-      await this.writeAudit({
-        pairingId: record.id,
-        action: 'already_consumed',
-        actorType: 'agent',
-        actorUserId: null,
-        meta,
-      });
-      return { status: 'already_consumed' };
-    }
+      const nodeId = (record.nodeId || '').trim();
+      if (!nodeId) {
+        throw new BadRequestException('Pairing missing node identity');
+      }
 
-    if (new Date() > record.expiresAt) {
-      await this.db.db
+      const existingAgent = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.ownerId, record.ownerId), eq(agents.nodeId, nodeId)))
+        .limit(1);
+
+      let agentId = existingAgent[0]?.id;
+      if (!agentId) {
+        const inserted = await tx
+          .insert(agents)
+          .values({
+            ownerId: record.ownerId,
+            nodeId,
+            displayName: record.agentName || nodeId,
+            status: 'active',
+          })
+          .returning({ id: agents.id });
+        agentId = inserted[0].id;
+      } else {
+        await tx
+          .update(agents)
+          .set({
+            displayName: record.agentName || nodeId,
+            status: 'active',
+            revokedAt: null,
+          })
+          .where(eq(agents.id, agentId));
+      }
+
+      const updated = await tx
         .update(agentPairings)
-        .set({ status: 'expired' })
-        .where(eq(agentPairings.code, code));
+        .set({
+          status: 'consumed',
+          consumedAt: new Date(),
+          agentId,
+        })
+        .where(
+          and(
+            eq(agentPairings.code, code),
+            eq(agentPairings.status, 'approved'),
+            gt(agentPairings.expiresAt, new Date()),
+            isNull(agentPairings.consumedAt),
+          ),
+        )
+        .returning({ id: agentPairings.id });
 
+      if (updated.length === 0) {
+        return { type: 'already_consumed' as const, record };
+      }
+
+      return { type: 'consumed' as const, record, agentId };
+    });
+
+    if (result.type === 'already_consumed') {
       await this.writeAudit({
-        pairingId: record.id,
-        action: 'expired',
-        actorType: 'system',
-        actorUserId: null,
-        meta,
-        metadata: { previousStatus: record.status },
-      });
-
-      throw new BadRequestException('Pairing code has expired');
-    }
-
-    if (record.status !== 'approved') {
-      throw new BadRequestException(
-        `Pairing must be approved before consuming. Current status: ${record.status}`,
-      );
-    }
-
-    if (!record.ownerId) {
-      throw new BadRequestException('Pairing has not been approved by an owner');
-    }
-
-    const tokens = await this.auth.issueSessionForUserId(record.ownerId);
-
-    let sessionId: string | undefined;
-    try {
-      const payload = this.jwt.verify(tokens.refreshToken, {
-        secret: this.getRefreshSecret(),
-      }) as { jti?: string };
-      sessionId = payload.jti;
-    } catch (error) {
-      this.logger.error(`Failed to verify refresh token: ${error}`);
-      throw new BadRequestException('Failed to issue session');
-    }
-
-    if (!sessionId) {
-      throw new BadRequestException('Failed to issue session');
-    }
-
-    const updated = await this.db.db
-      .update(agentPairings)
-      .set({
-        status: 'consumed',
-        consumedAt: new Date(),
-        sessionId,
-      })
-      .where(
-        and(
-          eq(agentPairings.code, code),
-          eq(agentPairings.status, 'approved'),
-          gt(agentPairings.expiresAt, new Date()),
-          isNull(agentPairings.consumedAt),
-        ),
-      )
-      .returning({ id: agentPairings.id });
-
-    if (updated.length === 0) {
-      await this.db.db
-        .update(userSessions)
-        .set({ revokedAt: new Date() })
-        .where(eq(userSessions.id, sessionId));
-
-      await this.writeAudit({
-        pairingId: record.id,
+        pairingId: result.record.id,
         action: 'already_consumed',
         actorType: 'agent',
         actorUserId: null,
         meta,
       });
-
       return { status: 'already_consumed' };
     }
+
+    const tokens = await this.agentAuth.issueSessionForAgent(result.agentId);
 
     await this.writeAudit({
-      pairingId: record.id,
+      pairingId: result.record.id,
       action: 'consumed',
       actorType: 'agent',
       actorUserId: null,
       meta,
+      metadata: { agentId: result.agentId },
     });
 
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
-      user: tokens.user,
+      agent: tokens.agent,
     };
+  }
+
+  async listOwnerAgents(ownerId: string) {
+    return this.db.db
+      .select({
+        id: agents.id,
+        nodeId: agents.nodeId,
+        displayName: agents.displayName,
+        status: agents.status,
+        lastSeenAt: agents.lastSeenAt,
+        createdAt: agents.createdAt,
+      })
+      .from(agents)
+      .where(eq(agents.ownerId, ownerId));
+  }
+
+  async revokeOwnerAgent(ownerId: string, agentId: string): Promise<void> {
+    const target = await this.db.db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.ownerId, ownerId)))
+      .limit(1);
+
+    if (!target[0]) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    await this.db.db
+      .update(agents)
+      .set({
+        status: 'revoked',
+        revokedAt: new Date(),
+      })
+      .where(eq(agents.id, agentId));
+
+    await this.db.db
+      .update(agentSessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(agentSessions.agentId, agentId), isNull(agentSessions.revokedAt)));
+
+    this.agentGateway.kickAgent(agentId);
   }
 }

@@ -1,6 +1,16 @@
-import { pgTable,pgEnum, uuid, text, timestamp, boolean,index,uniqueIndex,varchar,inet } from 'drizzle-orm/pg-core';
-import { ref } from 'process';
-import { createDeflate } from 'zlib';
+import {
+  pgTable,
+  pgEnum,
+  uuid,
+  text,
+  timestamp,
+  boolean,
+  index,
+  uniqueIndex,
+  varchar,
+  inet,
+  jsonb,
+} from 'drizzle-orm/pg-core';
 
 export const healthCheck = pgTable('health_check', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -41,6 +51,7 @@ export const userSessions = pgTable('user_sessions', {
 ]);
   
 export const pairingStatusEnum = pgEnum('pairing_status', ['pending', 'approved', 'expired', 'consumed']);
+export const agentStatusEnum = pgEnum('agent_status', ['active', 'revoked']);
 
 export const agentPairings = pgTable('agent_pairings', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -48,6 +59,9 @@ export const agentPairings = pgTable('agent_pairings', {
   status: pairingStatusEnum('status').default('pending').notNull(),
   ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'cascade' }), // NULLABLE - set on approve
   sessionId: uuid('session_id').references(() => userSessions.id, { onDelete: 'cascade' }), // NEW - set on consume
+  agentId: uuid('agent_id'),
+  nodeId: varchar('node_id', { length: 255 }),
+  appVersion: varchar('app_version', { length: 60 }),
   agentName: varchar('agent_name', { length: 255 }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),
@@ -57,7 +71,39 @@ export const agentPairings = pgTable('agent_pairings', {
   uniqueIndex('agent_pairings_code_idx').on(table.code),
   index('agent_pairings_status_idx').on(table.status),
   index('agent_pairings_expires_at_idx').on(table.expiresAt),
-  index('agent_pairings_owner_id_idx').on(table.ownerId), // NEW
+  index('agent_pairings_owner_id_idx').on(table.ownerId), 
+  index('agent_pairings_agent_id_idx').on(table.agentId),
+]);
+
+export const agents = pgTable('agents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  nodeId: varchar('node_id', { length: 255 }).notNull(),
+  displayName: varchar('display_name', { length: 255 }).notNull(),
+  status: agentStatusEnum('status').default('active').notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdate(() => new Date()),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('agents_owner_node_unique_idx').on(table.ownerId, table.nodeId),
+  index('agents_owner_id_idx').on(table.ownerId),
+  index('agents_status_idx').on(table.status),
+  index('agents_last_seen_at_idx').on(table.lastSeenAt),
+]);
+
+export const agentSessions = pgTable('agent_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }),
+  hashedRefreshToken: text('hashed_refresh_token').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown> | null>().default(null),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  index('agent_sessions_agent_id_idx').on(table.agentId),
+  index('agent_sessions_expires_at_idx').on(table.expiresAt),
+  index('agent_sessions_revoked_at_idx').on(table.revokedAt),
 ]);
 
 export const agentPairingAudit = pgTable('agent_pairing_audit', {
@@ -68,7 +114,7 @@ export const agentPairingAudit = pgTable('agent_pairing_audit', {
   actorType: varchar('actor_type', { length: 20 }).notNull(), // 'agent', 'owner', 'system'
   ipAddress: inet('ip_address'),
   userAgent: text('user_agent'),
-  metadata: text('metadata'), // JSON as text
+  metadata: text('metadata'), 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   index('audit_pairing_id_idx').on(table.pairingId),

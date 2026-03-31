@@ -2,10 +2,10 @@ export class ConsumePairingDto {
   status?: 'already_consumed';
   accessToken?: string;
   refreshToken?: string;
-  user?: {
+  agent?: {
     id: string;
-    email: string;
-    name: string;
-    role: string;
+    ownerId: string;
+    nodeId: string;
+    displayName: string;
   };
 }

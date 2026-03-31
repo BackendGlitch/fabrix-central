@@ -27,13 +27,19 @@ pnpm install
 cp .env.example .env
 ```
 
-3. Update `.env` values:
+3. Update `.env` values (required for **user** auth **and** **agent** pairing):
 
 ```env
 NODE_ENV=development
 PORT=4000
 DATABASE_URL=postgresql://<username>:<password>@<host>/<database>?sslmode=require
+JWT_ACCESS_SECRET=...
+JWT_REFRESH_SECRET=...
+AGENT_JWT_ACCESS_SECRET=...
+AGENT_JWT_REFRESH_SECRET=...
 ```
+
+Without `AGENT_JWT_*`, `POST /agent/pair/:code/consume` returns 500 and the smoke test fails at step 4.
 
 4. Push database schema:
 
@@ -55,6 +61,15 @@ pnpm run start:dev
 curl http://localhost:4000/health
 ```
 
+- **Agent pairing smoke test** (OWNER user must exist; sets `OWNER_EMAIL` / `OWNER_PASSWORD`):
+
+```bash
+export OWNER_EMAIL=owner@example.com
+export OWNER_PASSWORD=your-password
+pnpm smoke:pairing        # HTTP only (stdlib Python)
+pnpm smoke:pairing:ws     # + WebSocket (pip install websockets)
+```
+
 - WebSocket gateway:
   - Path: `ws://localhost:4000/ws/agent`
 
@@ -71,6 +86,7 @@ Expected health response shape:
 
 ## Scripts
 
+- `pnpm smoke:pairing` / `pnpm smoke:pairing:ws` - end-to-end agent pairing + optional WS check (`scripts/pairing_smoke.py`)
 - `pnpm run start:dev` - start in watch mode
 - `pnpm run build` - build project
 - `pnpm run start:prod` - run production build

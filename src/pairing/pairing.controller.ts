@@ -6,6 +6,8 @@ import {
   UseGuards,
   Req,
   BadRequestException,
+  Body,
+  Delete,
 } from '@nestjs/common';
 import type { Request } from 'express';
 
@@ -14,6 +16,7 @@ import { JwtAuthGuard, RolesGuard } from '../auth/guards/index';
 import { Roles } from '../auth/decorators/index';
 import {
   StartPairingResponseDto,
+  StartPairingRequestDto,
   PairingStatusDto,
   ConsumePairingDto,
 } from './dto/index';
@@ -39,10 +42,11 @@ export class PairingController {
    * UNAUTHENTICATED - Desktop app creates pending pairing without owner
    */
   @Post('start')
-  async startPairing(@Req() req: Request): Promise<StartPairingResponseDto> {
-    const body = req.body as any;
-    const agentName = body?.agentName;
-    return this.pairingService.startPairing(agentName, this.getRequestMeta(req));
+  async startPairing(
+    @Body() dto: StartPairingRequestDto,
+    @Req() req: Request,
+  ): Promise<StartPairingResponseDto> {
+    return this.pairingService.startPairing(dto || {}, this.getRequestMeta(req));
   }
 
   /**
@@ -84,6 +88,29 @@ export class PairingController {
     @Req() req: Request,
   ): Promise<ConsumePairingDto> {
     return this.pairingService.consumePairing(code, this.getRequestMeta(req));
+  }
+
+  @Get('owner/agents')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  async listOwnerAgents(@Req() req: Request) {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    return this.pairingService.listOwnerAgents(user.userId);
+  }
+
+  @Delete('owner/agents/:agentId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  async revokeOwnerAgent(@Param('agentId') agentId: string, @Req() req: Request) {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+    await this.pairingService.revokeOwnerAgent(user.userId, agentId);
+    return { message: 'Agent revoked' };
   }
 
   private getRequestMeta(req: Request): RequestMeta {

@@ -29,6 +29,13 @@
       "when": 1773437917732,
       "tag": "0003_lame_zeigeist",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774814757407,
+      "tag": "0005_swift_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

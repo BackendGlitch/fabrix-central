@@ -1,14 +1,16 @@
 import { PairingService } from './pairing.service';
-import { AuthService } from '../auth/auth.service';
-import { JwtService } from '@nestjs/jwt';
+import { AgentAuthService } from '../agent-auth/agent-auth.service';
+import type { AgentGateway } from '../ws/agent.gateway';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 type MockDb = {
   db: {
     insert: jest.Mock;
     select: jest.Mock;
     update: jest.Mock;
+    transaction: jest.Mock;
   };
 };
 
@@ -48,9 +50,9 @@ const makeUpdateChain = (returningResult: any[] = []) => {
 describe('PairingService', () => {
   let service: PairingService;
   let db: MockDb;
-  let auth: jest.Mocked<AuthService>;
-  let jwt: jest.Mocked<JwtService>;
+  let agentAuth: jest.Mocked<AgentAuthService>;
   let config: jest.Mocked<ConfigService>;
+  let agentGateway: { kickAgent: jest.Mock };
 
   beforeEach(() => {
     db = {
@@ -58,27 +60,26 @@ describe('PairingService', () => {
         insert: jest.fn(),
         select: jest.fn(),
         update: jest.fn(),
+        transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => fn(db.db)),
       },
     };
 
-    auth = {
-      issueSessionForUserId: jest.fn(),
-    } as unknown as jest.Mocked<AuthService>;
-
-    jwt = {
-      verify: jest.fn(),
-    } as unknown as jest.Mocked<JwtService>;
+    agentAuth = {
+      issueSessionForAgent: jest.fn(),
+    } as unknown as jest.Mocked<AgentAuthService>;
 
     config = {
       get: jest.fn(),
       getOrThrow: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>;
 
+    agentGateway = { kickAgent: jest.fn() };
+
     service = new PairingService(
       db as unknown as DatabaseService,
-      jwt,
       config,
-      auth,
+      agentAuth,
+      agentGateway as unknown as AgentGateway,
     );
   });
 
@@ -94,7 +95,7 @@ describe('PairingService', () => {
       return undefined;
     });
 
-    const result = await service.startPairing('Agent X', {
+    const result = await service.startPairing({ agentName: 'Agent X', nodeId: 'node-a' }, {
       ip: '1.2.3.4',
       userAgent: 'jest',
     });
@@ -149,32 +150,36 @@ describe('PairingService', () => {
 
   it('consumePairing returns auth tokens and marks pairing consumed', async () => {
     const expiresAt = new Date(Date.now() + 60_000);
-    db.db.select.mockReturnValueOnce(
-      makeSelectChain([
-        {
-          id: 'pair-1',
-          status: 'approved',
-          expiresAt,
-          ownerId: 'owner-1',
-        },
-      ]),
-    );
+    db.db.select
+      .mockReturnValueOnce(
+        makeSelectChain([
+          {
+            id: 'pair-1',
+            status: 'approved',
+            expiresAt,
+            ownerId: 'owner-1',
+            nodeId: 'node-a',
+            agentName: 'Agent A',
+          },
+        ]),
+      )
+      .mockReturnValueOnce(makeSelectChain([]));
 
-    auth.issueSessionForUserId.mockResolvedValue({
+    agentAuth.issueSessionForAgent.mockResolvedValue({
       accessToken: 'access',
       refreshToken: 'refresh',
-      user: {
-        id: 'owner-1',
-        email: 'owner@example.com',
-        name: 'Owner',
-        role: 'OWNER',
+      agent: {
+        id: 'agent-1',
+        ownerId: 'owner-1',
+        nodeId: 'node-a',
+        displayName: 'Agent A',
+        ownerEmail: 'owner@example.com',
       },
     });
 
-    config.getOrThrow.mockReturnValue('refresh_secret');
-    jwt.verify.mockReturnValue({ jti: 'session-1' });
-
+    const insertAgent = makeInsertChain([{ id: 'agent-1' }]);
     const updatePairing = makeUpdateChain([{ id: 'pair-1' }]);
+    db.db.insert.mockReturnValueOnce(insertAgent);
     db.db.update.mockReturnValueOnce(updatePairing);
 
     const insertAudit = makeInsertChain();
@@ -188,11 +193,12 @@ describe('PairingService', () => {
     expect(result).toEqual({
       accessToken: 'access',
       refreshToken: 'refresh',
-      user: {
-        id: 'owner-1',
-        email: 'owner@example.com',
-        name: 'Owner',
-        role: 'OWNER',
+      agent: {
+        id: 'agent-1',
+        ownerId: 'owner-1',
+        nodeId: 'node-a',
+        displayName: 'Agent A',
+        ownerEmail: 'owner@example.com',
       },
     });
 
@@ -200,7 +206,7 @@ describe('PairingService', () => {
     expect(setArg).toEqual(
       expect.objectContaining({
         status: 'consumed',
-        sessionId: 'session-1',
+        agentId: 'agent-1',
       }),
     );
     expect(setArg.consumedAt).toBeInstanceOf(Date);
@@ -228,6 +234,50 @@ describe('PairingService', () => {
     });
 
     expect(result).toEqual({ status: 'already_consumed' });
-    expect(auth.issueSessionForUserId).not.toHaveBeenCalled();
+    expect(agentAuth.issueSessionForAgent).not.toHaveBeenCalled();
+  });
+
+  it('consumePairing rejects expired codes', async () => {
+    const expiresAt = new Date(Date.now() - 60_000);
+    db.db.select.mockReturnValueOnce(
+      makeSelectChain([
+        {
+          id: 'pair-1',
+          status: 'approved',
+          expiresAt,
+          ownerId: 'owner-1',
+          nodeId: 'node-a',
+        },
+      ]),
+    );
+    const updatePairing = makeUpdateChain();
+    db.db.update.mockReturnValueOnce(updatePairing);
+
+    await expect(
+      service.consumePairing('ABC123', {
+        ip: '1.2.3.4',
+        userAgent: 'jest',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('revokeOwnerAgent throws when agent is not owned by requester', async () => {
+    db.db.select.mockReturnValueOnce(makeSelectChain([]));
+    await expect(service.revokeOwnerAgent('owner-1', 'agent-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('revokeOwnerAgent revokes DB rows and kicks agent WebSockets', async () => {
+    db.db.select.mockReturnValueOnce(
+      makeSelectChain([{ id: 'agent-1', ownerId: 'owner-1', nodeId: 'n', displayName: 'A' }]),
+    );
+    const updateAgents = makeUpdateChain();
+    const updateSessions = makeUpdateChain();
+    db.db.update.mockReturnValueOnce(updateAgents).mockReturnValueOnce(updateSessions);
+
+    await service.revokeOwnerAgent('owner-1', 'agent-1');
+
+    expect(agentGateway.kickAgent).toHaveBeenCalledWith('agent-1');
   });
 });
