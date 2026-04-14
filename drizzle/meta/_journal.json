@@ -15,6 +15,20 @@
       "when": 1772461388083,
       "tag": "0001_brown_triathlon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776172344070,
+      "tag": "0002_flaky_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776192698470,
+      "tag": "0003_fix_agent_status_enum",
+      "breakpoints": true
     }
   ]
 }
