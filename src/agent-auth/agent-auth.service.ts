@@ -43,6 +43,10 @@ export class AgentAuthService {
     private readonly config: ConfigService,
   ) {}
 
+  private normalizeStatus(input: unknown): string {
+    return String(input ?? '').trim().toLowerCase();
+  }
+
   async issueSessionForAgent(agentId: string): Promise<AgentTokens> {
     const [agent] = await this.db.db
       .select({
@@ -59,7 +63,7 @@ export class AgentAuthService {
     if (!agent) {
       throw new UnauthorizedException('Agent not found');
     }
-    if (agent.status !== 'active') {
+    if (this.normalizeStatus(agent.status) !== 'active') {
       throw new ForbiddenException('Agent is revoked');
     }
 
@@ -74,7 +78,9 @@ export class AgentAuthService {
   async refresh(refreshToken: string): Promise<AgentTokens> {
     let payload: { jti: string; sub: string; typ?: string };
     try {
-      payload = this.jwt.verify(refreshToken, { secret: this.getRefreshSecret() });
+      payload = this.jwt.verify(refreshToken, {
+        secret: this.getRefreshSecret(),
+      });
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
@@ -86,7 +92,9 @@ export class AgentAuthService {
     const [session] = await this.db.db
       .select()
       .from(agentSessions)
-      .where(and(eq(agentSessions.id, payload.jti), isNull(agentSessions.revokedAt)))
+      .where(
+        and(eq(agentSessions.id, payload.jti), isNull(agentSessions.revokedAt)),
+      )
       .limit(1);
 
     if (!session) {
@@ -96,7 +104,10 @@ export class AgentAuthService {
       throw new UnauthorizedException('Refresh token expired');
     }
 
-    const valid = await bcrypt.compare(refreshToken, session.hashedRefreshToken);
+    const valid = await bcrypt.compare(
+      refreshToken,
+      session.hashedRefreshToken,
+    );
     if (!valid) {
       await this.db.db
         .update(agentSessions)
@@ -117,7 +128,12 @@ export class AgentAuthService {
     await this.db.db
       .update(agentSessions)
       .set({ revokedAt: new Date() })
-      .where(and(eq(agentSessions.agentId, agentId), isNull(agentSessions.revokedAt)));
+      .where(
+        and(
+          eq(agentSessions.agentId, agentId),
+          isNull(agentSessions.revokedAt),
+        ),
+      );
   }
 
   async isAgentActive(agentId: string): Promise<boolean> {
@@ -126,7 +142,7 @@ export class AgentAuthService {
       .from(agents)
       .where(eq(agents.id, agentId))
       .limit(1);
-    return agent?.status === 'active';
+    return this.normalizeStatus(agent?.status) === 'active';
   }
 
   async touchLastSeen(agentId: string): Promise<void> {
@@ -170,7 +186,8 @@ export class AgentAuthService {
 
     const accessTtl = this.config.get<string>('AGENT_JWT_ACCESS_TTL') || '15m';
     const refreshTtl =
-      this.config.get<string>('AGENT_JWT_REFRESH_TTL') || `${this.REFRESH_DAYS}d`;
+      this.config.get<string>('AGENT_JWT_REFRESH_TTL') ||
+      `${this.REFRESH_DAYS}d`;
 
     const accessToken = this.jwt.sign(
       {
@@ -199,7 +216,10 @@ export class AgentAuthService {
       },
     );
 
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, this.SALT_ROUNDS);
+    const hashedRefreshToken = await bcrypt.hash(
+      refreshToken,
+      this.SALT_ROUNDS,
+    );
     await this.db.db.insert(agentSessions).values({
       id: sessionId,
       agentId: agent.id,
@@ -234,9 +254,7 @@ export class AgentAuthService {
     const raw = this.config.get<string>(key);
     const value = typeof raw === 'string' ? raw.trim() : '';
     if (!value) {
-      this.logger.error(
-        `Missing ${key}.`,
-      );
+      this.logger.error(`Missing ${key}.`);
       throw new InternalServerErrorException(
         `Server misconfiguration: ${key} is not set. `,
       );

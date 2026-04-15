@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 
 import { DatabaseService } from '../database/database.service';
@@ -83,6 +83,20 @@ export class PairingService {
     }
     next.push(now);
     this.requestLog.set(key, next);
+  }
+
+  private asDbStatus(input: unknown): string {
+    return String(input ?? '').trim();
+  }
+
+  private toActiveStatus(currentStatus: unknown): 'active' | 'ACTIVE' {
+    const status = this.asDbStatus(currentStatus);
+    return status === status.toUpperCase() ? 'ACTIVE' : 'active';
+  }
+
+  private toRevokedStatus(currentStatus: unknown): 'revoked' | 'REVOKED' {
+    const status = this.asDbStatus(currentStatus);
+    return status === status.toUpperCase() ? 'REVOKED' : 'revoked';
   }
 
   /**
@@ -327,16 +341,16 @@ export class PairingService {
             ownerId: record.ownerId,
             nodeId,
             displayName: record.agentName || nodeId,
-            status: 'active',
           })
           .returning({ id: agents.id });
         agentId = inserted[0].id;
       } else {
+        const activeStatus = this.toActiveStatus(existingAgent[0].status);
         await tx
           .update(agents)
           .set({
             displayName: record.agentName || nodeId,
-            status: 'active',
+            status: activeStatus,
             revokedAt: null,
           })
           .where(eq(agents.id, agentId));
@@ -396,7 +410,7 @@ export class PairingService {
   }
 
   async listOwnerAgents(ownerId: string) {
-    return this.db.db
+    const rows = await this.db.db
       .select({
         id: agents.id,
         nodeId: agents.nodeId,
@@ -407,6 +421,23 @@ export class PairingService {
       })
       .from(agents)
       .where(eq(agents.ownerId, ownerId));
+
+    return rows.map((agent) => {
+      const runtime = this.agentGateway.getAgentRuntimeState(agent.id);
+      const normalizedStatus = String(agent.status).toLowerCase();
+      const status = normalizedStatus === 'revoked' ? 'revoked' : 'active';
+      const runtimeStatus =
+        status === 'revoked' ? 'revoked' : runtime.connected ? 'online' : 'offline';
+      const activityState = runtimeStatus === 'online' ? runtime.activityState : 'offline';
+
+      return {
+        ...agent,
+        status,
+        runtimeStatus,
+        activityState,
+        lastHeartbeatAt: runtime.lastHeartbeatAt,
+      };
+    });
   }
 
   async revokeOwnerAgent(ownerId: string, agentId: string): Promise<void> {
@@ -423,7 +454,7 @@ export class PairingService {
     await this.db.db
       .update(agents)
       .set({
-        status: 'revoked',
+        status: sql`${this.toRevokedStatus(target[0].status)}::agent_status`,
         revokedAt: new Date(),
       })
       .where(eq(agents.id, agentId));
