@@ -36,6 +36,13 @@
       "when": 1774814757407,
       "tag": "0005_swift_goblin_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776349298114,
+      "tag": "0005_bent_luke_cage",
+      "breakpoints": true
     }
   ]
 }

@@ -121,3 +121,40 @@ export const agentPairingAudit = pgTable('agent_pairing_audit', {
   index('audit_action_idx').on(table.action),
   index('audit_created_at_idx').on(table.createdAt),
 ]);
+
+export const jobStatusEnum = pgEnum('job_status', ['pending', 'queued', 'printing', 'completed', 'failed', 'cancelled']);
+
+export const jobFiles = pgTable('job_files', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  filename: varchar('filename', { length: 255 }).notNull(),
+  originalName: varchar('original_name', { length: 255 }).notNull(),
+  mimeType: varchar('mime_type', { length: 50 }).notNull(),
+  size: text('size').notNull(), // Store as text to handle large numbers
+  storagePath: varchar('storage_path', { length: 512 }).notNull(),
+  checksum: varchar('checksum', { length: 64 }), // SHA256 hash
+  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index('job_files_uploaded_at_idx').on(table.uploadedAt),
+  index('job_files_checksum_idx').on(table.checksum),
+]);
+
+export const jobs = pgTable('jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  customerId: uuid('customer_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fileId: uuid('file_id').notNull().references(() => jobFiles.id, { onDelete: 'cascade' }),
+  printerId: uuid('printer_id').references(() => agents.id, { onDelete: 'set null' }), // NULLABLE - assigned later
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  status: jobStatusEnum('status').default('pending').notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown> | null>().default(null), // Print settings, etc
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull().$onUpdate(() => new Date()),
+}, (table) => [
+  index('jobs_customer_id_idx').on(table.customerId),
+  index('jobs_printer_id_idx').on(table.printerId),
+  index('jobs_status_idx').on(table.status),
+  index('jobs_created_at_idx').on(table.createdAt),
+]);

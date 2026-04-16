@@ -12,18 +12,18 @@ import {
 
 export class RegisterDto {
   @IsEmail()
-  email: string;
+  email!: string;
   
   @IsString()
   @MinLength(8, {message: 'Password must be at least 8 characters long'})
-  password: string;
+  password!: string;
 
   @IsString()
   @IsNotEmpty({message: 'First name is required'})
-  name: string;
+  name!: string;
 
   @IsIn(PUBLIC_REGISTRATION_ROLES, {
     message: 'Role must be either OWNER or CUSTOMER',
   })
-  role: PublicRegistrationRole;
+  role!: PublicRegistrationRole;
 }
