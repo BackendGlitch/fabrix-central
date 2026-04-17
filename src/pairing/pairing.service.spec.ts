@@ -29,7 +29,8 @@ const makeInsertChain = (returningResult: any[] = []) => {
   const chain: any = {
     values: jest.fn(),
     returning: jest.fn().mockResolvedValue(returningResult),
-    then: (resolve: any, reject: any) => Promise.resolve(undefined).then(resolve, reject),
+    then: (resolve: any, reject: any) =>
+      Promise.resolve(undefined).then(resolve, reject),
   };
   chain.values.mockReturnValue(chain);
   return chain;
@@ -40,7 +41,8 @@ const makeUpdateChain = (returningResult: any[] = []) => {
     set: jest.fn(),
     where: jest.fn(),
     returning: jest.fn().mockResolvedValue(returningResult),
-    then: (resolve: any, reject: any) => Promise.resolve(undefined).then(resolve, reject),
+    then: (resolve: any, reject: any) =>
+      Promise.resolve(undefined).then(resolve, reject),
   };
   chain.set.mockReturnValue(chain);
   chain.where.mockReturnValue(chain);
@@ -60,7 +62,9 @@ describe('PairingService', () => {
         insert: jest.fn(),
         select: jest.fn(),
         update: jest.fn(),
-        transaction: jest.fn(async (fn: (tx: any) => Promise<any>) => fn(db.db)),
+        transaction: jest.fn(async (fn: (tx: any) => Promise<any>) =>
+          fn(db.db),
+        ),
       },
     };
 
@@ -87,7 +91,9 @@ describe('PairingService', () => {
     const insertPairing = makeInsertChain([{ id: 'pair-1' }]);
     const insertAudit = makeInsertChain();
 
-    db.db.insert.mockReturnValueOnce(insertPairing).mockReturnValueOnce(insertAudit);
+    db.db.insert
+      .mockReturnValueOnce(insertPairing)
+      .mockReturnValueOnce(insertAudit);
 
     config.get.mockImplementation((key: string) => {
       if (key === 'AGENT_LOGIN_BASE_URL') return 'http://example.com/login';
@@ -95,10 +101,13 @@ describe('PairingService', () => {
       return undefined;
     });
 
-    const result = await service.startPairing({ agentName: 'Agent X', nodeId: 'node-a' }, {
-      ip: '1.2.3.4',
-      userAgent: 'jest',
-    });
+    const result = await service.startPairing(
+      { agentName: 'Agent X', nodeId: 'node-a' },
+      {
+        ip: '1.2.3.4',
+        userAgent: 'jest',
+      },
+    );
 
     expect(result.pairing_code).toHaveLength(6);
     expect(result.login_url).toContain(result.pairing_code);
@@ -263,18 +272,22 @@ describe('PairingService', () => {
 
   it('revokeOwnerAgent throws when agent is not owned by requester', async () => {
     db.db.select.mockReturnValueOnce(makeSelectChain([]));
-    await expect(service.revokeOwnerAgent('owner-1', 'agent-1')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.revokeOwnerAgent('owner-1', 'agent-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('revokeOwnerAgent revokes DB rows and kicks agent WebSockets', async () => {
     db.db.select.mockReturnValueOnce(
-      makeSelectChain([{ id: 'agent-1', ownerId: 'owner-1', nodeId: 'n', displayName: 'A' }]),
+      makeSelectChain([
+        { id: 'agent-1', ownerId: 'owner-1', nodeId: 'n', displayName: 'A' },
+      ]),
     );
     const updateAgents = makeUpdateChain();
     const updateSessions = makeUpdateChain();
-    db.db.update.mockReturnValueOnce(updateAgents).mockReturnValueOnce(updateSessions);
+    db.db.update
+      .mockReturnValueOnce(updateAgents)
+      .mockReturnValueOnce(updateSessions);
 
     await service.revokeOwnerAgent('owner-1', 'agent-1');
 

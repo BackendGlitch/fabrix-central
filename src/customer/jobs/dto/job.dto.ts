@@ -17,14 +17,14 @@ export class UploadSTLResponseDto {
 export class CreateJobRequestDto {
   @IsUUID()
   fileId!: string;
-  
+
   @IsString()
   name!: string;
-  
+
   @IsOptional()
   @IsString()
   description?: string;
-  
+
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
@@ -49,7 +49,9 @@ export class JobDetailDto {
   status!: string;
   fileId!: string;
   customerId!: string;
+  customerName?: string | null;
   printerId!: string | null;
+  printerDisplayName?: string | null;
   file!: JobFileDto;
   metadata!: Record<string, unknown> | null;
   startedAt!: Date | null;

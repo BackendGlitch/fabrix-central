@@ -137,7 +137,9 @@ export class AuthService {
     const [session] = await this.db.db
       .select()
       .from(userSessions)
-      .where(and(eq(userSessions.id, payload.jti), isNull(userSessions.revokedAt)))
+      .where(
+        and(eq(userSessions.id, payload.jti), isNull(userSessions.revokedAt)),
+      )
       .limit(1);
 
     if (!session) {
@@ -148,7 +150,10 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token expired');
     }
 
-    const valid = await bcrypt.compare(refreshToken, session.hashedRefreshToken);
+    const valid = await bcrypt.compare(
+      refreshToken,
+      session.hashedRefreshToken,
+    );
     if (!valid) {
       await this.db.db
         .update(userSessions)
@@ -235,7 +240,10 @@ export class AuthService {
       { secret: this.getRefreshSecret(), expiresIn: `${this.REFRESH_DAYS}d` },
     );
 
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, this.SALT_ROUNDS);
+    const hashedRefreshToken = await bcrypt.hash(
+      refreshToken,
+      this.SALT_ROUNDS,
+    );
 
     await this.db.db.insert(userSessions).values({
       id: sessionId,

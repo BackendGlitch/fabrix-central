@@ -14,7 +14,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (!user) {
       const infoName = info?.name || '';
       const infoMessage = info?.message || 'Unauthorized';
-      if (infoName === 'TokenExpiredError' || infoMessage.toLowerCase().includes('expired')) {
+      if (
+        infoName === 'TokenExpiredError' ||
+        infoMessage.toLowerCase().includes('expired')
+      ) {
         this.logger.debug(`JWT expired: ${infoMessage}`);
       } else {
         this.logger.warn(`JWT rejected: ${infoMessage}`);

@@ -1,1 +1,6 @@
-export type { JwtPayload, TokenPair, AuthUser, AuthTokens } from './jwt.interface.js';
+export type {
+  JwtPayload,
+  TokenPair,
+  AuthUser,
+  AuthTokens,
+} from './jwt.interface.js';

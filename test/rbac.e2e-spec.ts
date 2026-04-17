@@ -95,9 +95,7 @@ describe('RBAC Guards (e2e)', () => {
   // ── 401 Unauthenticated ────────────────────────────────────────────────
 
   it('should return 401 when no token is provided', () => {
-    return request(app.getHttpServer())
-      .get('/test/owner-only')
-      .expect(401);
+    return request(app.getHttpServer()).get('/test/owner-only').expect(401);
   });
 
   it('should return 401 when an invalid token is provided', () => {

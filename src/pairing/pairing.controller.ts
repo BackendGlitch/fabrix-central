@@ -46,7 +46,10 @@ export class PairingController {
     @Body() dto: StartPairingRequestDto,
     @Req() req: Request,
   ): Promise<StartPairingResponseDto> {
-    return this.pairingService.startPairing(dto || {}, this.getRequestMeta(req));
+    return this.pairingService.startPairing(
+      dto || {},
+      this.getRequestMeta(req),
+    );
   }
 
   /**
@@ -68,13 +71,20 @@ export class PairingController {
   @Post(':code/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('OWNER')
-  async approvePairing(@Param('code') code: string, @Req() req: Request): Promise<{ message: string }> {
+  async approvePairing(
+    @Param('code') code: string,
+    @Req() req: Request,
+  ): Promise<{ message: string }> {
     const user = req.user as AuthUser;
     if (!user || !user.userId) {
       throw new BadRequestException('User not authenticated');
     }
 
-    return this.pairingService.approvePairing(code, user.userId, this.getRequestMeta(req));
+    return this.pairingService.approvePairing(
+      code,
+      user.userId,
+      this.getRequestMeta(req),
+    );
   }
 
   /**
@@ -104,7 +114,10 @@ export class PairingController {
   @Delete('owner/agents/:agentId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('OWNER')
-  async revokeOwnerAgent(@Param('agentId') agentId: string, @Req() req: Request) {
+  async revokeOwnerAgent(
+    @Param('agentId') agentId: string,
+    @Req() req: Request,
+  ) {
     const user = req.user as AuthUser;
     if (!user || !user.userId) {
       throw new BadRequestException('User not authenticated');

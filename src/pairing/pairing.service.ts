@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
@@ -6,7 +11,12 @@ import { randomBytes } from 'crypto';
 import { DatabaseService } from '../database/database.service';
 import { AgentAuthService } from '../agent-auth/agent-auth.service';
 import { AgentGateway } from '../ws/agent.gateway';
-import { agentPairings, agentPairingAudit, agents, agentSessions } from '../database/schema';
+import {
+  agentPairings,
+  agentPairingAudit,
+  agents,
+  agentSessions,
+} from '../database/schema';
 import {
   StartPairingResponseDto,
   StartPairingRequestDto,
@@ -66,7 +76,10 @@ export class PairingService {
     });
   }
 
-  private enforceRateLimit(action: 'start' | 'status' | 'consume', meta?: RequestMeta): void {
+  private enforceRateLimit(
+    action: 'start' | 'status' | 'consume',
+    meta?: RequestMeta,
+  ): void {
     const ip = (meta?.ip || 'unknown').slice(0, 80);
     const now = Date.now();
     const windowMs = 60_000;
@@ -103,13 +116,18 @@ export class PairingService {
    * POST /agent/pair/start
    * Unauthenticated - creates pending pairing without owner
    */
-  async startPairing(input: StartPairingRequestDto, meta?: RequestMeta): Promise<StartPairingResponseDto> {
+  async startPairing(
+    input: StartPairingRequestDto,
+    meta?: RequestMeta,
+  ): Promise<StartPairingResponseDto> {
     this.enforceRateLimit('start', meta);
     let code = this.generateCode();
     const baseUrl =
-      this.config.get<string>('AGENT_LOGIN_BASE_URL') || 'http://localhost:3000/agent/auth';
+      this.config.get<string>('AGENT_LOGIN_BASE_URL') ||
+      'http://localhost:3000/agent/auth';
     const expiryMinutes =
-      this.config.get<number>('AGENT_PAIRING_EXPIRY_MINUTES') || this.PAIRING_EXPIRY_MINUTES;
+      this.config.get<number>('AGENT_PAIRING_EXPIRY_MINUTES') ||
+      this.PAIRING_EXPIRY_MINUTES;
 
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
@@ -168,7 +186,10 @@ export class PairingService {
    * GET /agent/pair/:code/status
    * Check pairing status - no auth required
    */
-  async getPairingStatus(code: string, meta?: RequestMeta): Promise<PairingStatusDto> {
+  async getPairingStatus(
+    code: string,
+    meta?: RequestMeta,
+  ): Promise<PairingStatusDto> {
     this.enforceRateLimit('status', meta);
     const pairing = await this.db.db
       .select()
@@ -182,7 +203,11 @@ export class PairingService {
 
     const record = pairing[0];
 
-    if (new Date() > record.expiresAt && record.status !== 'consumed' && record.status !== 'expired') {
+    if (
+      new Date() > record.expiresAt &&
+      record.status !== 'consumed' &&
+      record.status !== 'expired'
+    ) {
       const previousStatus = record.status;
       await this.db.db
         .update(agentPairings)
@@ -292,7 +317,10 @@ export class PairingService {
    * Exchange approved code for standard auth tokens (accessToken, refreshToken, user)
    * Idempotent: already-consumed returns { status: 'already_consumed' }
    */
-  async consumePairing(code: string, meta?: RequestMeta): Promise<ConsumePairingDto> {
+  async consumePairing(
+    code: string,
+    meta?: RequestMeta,
+  ): Promise<ConsumePairingDto> {
     this.enforceRateLimit('consume', meta);
     const result = await this.db.db.transaction(async (tx: any) => {
       const pairing = await tx
@@ -330,7 +358,9 @@ export class PairingService {
       const existingAgent = await tx
         .select()
         .from(agents)
-        .where(and(eq(agents.ownerId, record.ownerId), eq(agents.nodeId, nodeId)))
+        .where(
+          and(eq(agents.ownerId, record.ownerId), eq(agents.nodeId, nodeId)),
+        )
         .limit(1);
 
       let agentId = existingAgent[0]?.id;
@@ -427,8 +457,13 @@ export class PairingService {
       const normalizedStatus = String(agent.status).toLowerCase();
       const status = normalizedStatus === 'revoked' ? 'revoked' : 'active';
       const runtimeStatus =
-        status === 'revoked' ? 'revoked' : runtime.connected ? 'online' : 'offline';
-      const activityState = runtimeStatus === 'online' ? runtime.activityState : 'offline';
+        status === 'revoked'
+          ? 'revoked'
+          : runtime.connected
+            ? 'online'
+            : 'offline';
+      const activityState =
+        runtimeStatus === 'online' ? runtime.activityState : 'offline';
 
       return {
         ...agent,
@@ -462,7 +497,12 @@ export class PairingService {
     await this.db.db
       .update(agentSessions)
       .set({ revokedAt: new Date() })
-      .where(and(eq(agentSessions.agentId, agentId), isNull(agentSessions.revokedAt)));
+      .where(
+        and(
+          eq(agentSessions.agentId, agentId),
+          isNull(agentSessions.revokedAt),
+        ),
+      );
 
     this.agentGateway.kickAgent(agentId);
   }

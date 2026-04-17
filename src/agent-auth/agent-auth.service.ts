@@ -44,7 +44,9 @@ export class AgentAuthService {
   ) {}
 
   private normalizeStatus(input: unknown): string {
-    return String(input ?? '').trim().toLowerCase();
+    return String(input ?? '')
+      .trim()
+      .toLowerCase();
   }
 
   async issueSessionForAgent(agentId: string): Promise<AgentTokens> {

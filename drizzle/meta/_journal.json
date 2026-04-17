@@ -43,6 +43,13 @@
       "when": 1776349298114,
       "tag": "0005_bent_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776382151385,
+      "tag": "0006_tough_overlord",
+      "breakpoints": true
     }
   ]
 }

@@ -14,8 +14,8 @@ export class RedisService implements OnModuleDestroy {
     const commonOpts: RedisOptions = {
       maxRetriesPerRequest: 3,
       retryStrategy(times) {
-        if (times > 5) return null;           
-        return Math.min(times * 500, 3_000); 
+        if (times > 5) return null;
+        return Math.min(times * 500, 3_000);
       },
       lazyConnect: true,
     };
@@ -23,8 +23,12 @@ export class RedisService implements OnModuleDestroy {
     this.pub = new Redis(url, commonOpts);
     this.sub = new Redis(url, commonOpts);
 
-    this.pub.on('error', (err) => this.logger.warn(`Redis pub error: ${err.message}`));
-    this.sub.on('error', (err) => this.logger.warn(`Redis sub error: ${err.message}`));
+    this.pub.on('error', (err) =>
+      this.logger.warn(`Redis pub error: ${err.message}`),
+    );
+    this.sub.on('error', (err) =>
+      this.logger.warn(`Redis sub error: ${err.message}`),
+    );
 
     this.connectClients();
   }
@@ -42,9 +46,12 @@ export class RedisService implements OnModuleDestroy {
       if (this.messageHandler) this.messageHandler(channel, message);
     });
 
-    this.sub.subscribe('ws:broadcast').then(() => {
-      this.logger.log('Subscribed to channel: ws:broadcast');
-    }).catch(err => this.logger.error('Subscribe error', err));
+    this.sub
+      .subscribe('ws:broadcast')
+      .then(() => {
+        this.logger.log('Subscribed to channel: ws:broadcast');
+      })
+      .catch((err) => this.logger.error('Subscribe error', err));
   }
 
   publish(channel: string, message: string) {

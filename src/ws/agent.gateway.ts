@@ -11,6 +11,10 @@ import { Server, WebSocket } from 'ws';
 import { Logger, OnModuleInit } from '@nestjs/common';
 import type { IncomingMessage } from 'http';
 import { AgentAuthService } from '../agent-auth/agent-auth.service';
+import { DatabaseService } from '../database/database.service';
+
+import { eq } from 'drizzle-orm';
+import { jobs } from '../database/schema';
 
 type AgentActivityState = 'idle' | 'working';
 
@@ -21,9 +25,14 @@ interface AgentRuntimeState {
 }
 
 @WebSocketGateway({ path: '/ws/agent' })
-export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
+export class AgentGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
+{
   private readonly logger = new Logger(AgentGateway.name);
-  private readonly contexts = new WeakMap<WebSocket, { agentId: string; ownerId: string }>();
+  private readonly contexts = new WeakMap<
+    WebSocket,
+    { agentId: string; ownerId: string }
+  >();
   private readonly socketCountByAgent = new Map<string, number>();
   private readonly activityByAgent = new Map<string, AgentActivityState>();
   private readonly lastHeartbeatByAgent = new Map<string, Date>();
@@ -31,7 +40,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly agentAuth: AgentAuthService) {}
+  constructor(
+    private readonly agentAuth: AgentAuthService,
+    private readonly db: DatabaseService,
+  ) {}
 
   onModuleInit() {
     // Redis pub/sub disabled — will be re-enabled when Redis is configured
@@ -66,7 +78,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     if (context) {
       this.markDisconnected(context.agentId);
     }
-    this.logger.log(`Agent disconnected${context ? `: ${context.agentId}` : ''}`);
+    this.logger.log(
+      `Agent disconnected${context ? `: ${context.agentId}` : ''}`,
+    );
   }
 
   /** Close any open agent WebSockets (e.g. after owner revokes the device). */
@@ -98,7 +112,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       return { type: 'error', message: 'Unauthorized' };
     }
     this.markHeartbeat(context.agentId);
-    this.markActivity(context.agentId, this.extractActivityState(data) ?? 'idle');
+    this.markActivity(
+      context.agentId,
+      this.extractActivityState(data) ?? 'idle',
+    );
     void this.agentAuth.touchLastSeen(context.agentId);
     this.logger.log(`Received ping from agent ${context.agentId}`);
     return { type: 'pong', timestamp: new Date().toISOString() };
@@ -111,9 +128,14 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
       return { type: 'error', message: 'Unauthorized' };
     }
     const nodeId = data?.node_id ?? 'unknown';
-    this.logger.log(`Agent hello from node: ${nodeId} (agent: ${context.agentId})`);
+    this.logger.log(
+      `Agent hello from node: ${nodeId} (agent: ${context.agentId})`,
+    );
     this.markHeartbeat(context.agentId);
-    this.markActivity(context.agentId, this.extractActivityState(data) ?? 'idle');
+    this.markActivity(
+      context.agentId,
+      this.extractActivityState(data) ?? 'idle',
+    );
     void this.agentAuth.touchLastSeen(context.agentId);
     return {
       type: 'hello_ack',
@@ -124,13 +146,19 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
   }
 
   @SubscribeMessage('heartbeat')
-  handleHeartbeat(@MessageBody() data: any, @ConnectedSocket() client: WebSocket) {
+  handleHeartbeat(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
     const context = this.contexts.get(client);
     if (!context) {
       return { type: 'error', message: 'Unauthorized' };
     }
     this.markHeartbeat(context.agentId);
-    this.markActivity(context.agentId, this.extractActivityState(data) ?? 'idle');
+    this.markActivity(
+      context.agentId,
+      this.extractActivityState(data) ?? 'idle',
+    );
     void this.agentAuth.touchLastSeen(context.agentId);
     return {
       type: 'heartbeat_ack',
@@ -155,8 +183,258 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect, O
     };
   }
 
+  /**
+   * Send a message to a specific connected agent
+   */
+  sendToAgent(agentId: string, message: any): boolean {
+    if (!this.server?.clients) {
+      return false;
+    }
+
+    let sent = false;
+    const messageStr = JSON.stringify(message);
+
+    for (const client of this.server.clients) {
+      if (client.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      const context = this.contexts.get(client);
+      if (context?.agentId === agentId) {
+        try {
+          client.send(messageStr);
+          sent = true;
+          this.logger.log(
+            `Sent message to agent ${agentId}: ${message.type || 'unknown'}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Failed to send message to agent ${agentId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    return sent;
+  }
+
+  /**
+   * Assign a job to an agent
+   */
+  assignJobToAgent(agentId: string, job: any): boolean {
+    return this.sendToAgent(agentId, {
+      type: 'job_assigned',
+      job,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Notify agent about job status update
+   */
+  notifyJobStatusUpdate(
+    agentId: string,
+    jobId: string,
+    status: string,
+    metadata?: any,
+  ): boolean {
+    return this.sendToAgent(agentId, {
+      type: 'job_status_update',
+      job_id: jobId,
+      status,
+      metadata,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Get all currently connected agent IDs
+   */
+  getConnectedAgentIds(): string[] {
+    if (!this.server?.clients) {
+      return [];
+    }
+
+    const agentIds = new Set<string>();
+    for (const client of this.server.clients) {
+      if (client.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      const context = this.contexts.get(client);
+      if (context?.agentId) {
+        agentIds.add(context.agentId);
+      }
+    }
+
+    return Array.from(agentIds);
+  }
+
+  /**
+   * Message handler for job acceptance from agent
+   */
+  @SubscribeMessage('job_accept')
+  async handleJobAccept(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
+    const context = this.contexts.get(client);
+    if (!context) {
+      return { type: 'error', message: 'Unauthorized' };
+    }
+
+    const jobId = data?.job_id;
+    if (!jobId) {
+      return { type: 'error', message: 'Missing job_id' };
+    }
+
+    // Update job status to printing in database
+    try {
+      await this.db.db
+        .update(jobs)
+        .set({
+          status: 'printing',
+          updatedAt: new Date(),
+          startedAt: new Date(),
+        })
+        .where(eq(jobs.id, jobId));
+      this.logger.log(`Job ${jobId} status updated to printing`);
+    } catch (error) {
+      this.logger.error(`Failed to update job ${jobId} status:`, error);
+      return { type: 'error', message: 'Failed to update job status' };
+    }
+
+    this.logger.log(`Agent ${context.agentId} accepted job ${jobId}`);
+    this.markActivity(context.agentId, 'working');
+
+    return {
+      type: 'job_accept_ack',
+      job_id: jobId,
+      message: 'Job accepted successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Message handler for job completion from agent
+   */
+  @SubscribeMessage('job_complete')
+  async handleJobComplete(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
+    const context = this.contexts.get(client);
+    if (!context) {
+      return { type: 'error', message: 'Unauthorized' };
+    }
+
+    const jobId = data?.job_id;
+    const status = data?.status || 'completed';
+    const result = data?.result || {};
+
+    if (!jobId) {
+      return { type: 'error', message: 'Missing job_id' };
+    }
+
+    // Update job status in database
+    try {
+      await this.db.db
+        .update(jobs)
+        .set({
+          status,
+          updatedAt: new Date(),
+          completedAt: ['completed', 'failed', 'cancelled'].includes(status)
+            ? new Date()
+            : undefined,
+        })
+        .where(eq(jobs.id, jobId));
+      this.logger.log(`Job ${jobId} status updated to ${status}`);
+    } catch (error) {
+      this.logger.error(`Failed to update job ${jobId} status:`, error);
+      return { type: 'error', message: 'Failed to update job status' };
+    }
+
+    this.logger.log(
+      `Agent ${context.agentId} completed job ${jobId} with status ${status}`,
+    );
+    this.markActivity(context.agentId, 'idle');
+
+    return {
+      type: 'job_complete_ack',
+      job_id: jobId,
+      status,
+      message: 'Job completion recorded',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Message handler for job progress updates from agent
+   */
+  @SubscribeMessage('job_progress')
+  async handleJobProgress(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
+    const context = this.contexts.get(client);
+    if (!context) {
+      return { type: 'error', message: 'Unauthorized' };
+    }
+
+    const jobId = data?.job_id;
+    const progress = data?.progress;
+    const message = data?.message;
+
+    if (!jobId || progress === undefined) {
+      return { type: 'error', message: 'Missing job_id or progress' };
+    }
+
+    // Update job progress in metadata
+    try {
+      const currentJob = await this.db.db
+        .select({ metadata: jobs.metadata })
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (currentJob[0]) {
+        const metadata = currentJob[0].metadata || {};
+        const updatedMetadata = {
+          ...metadata,
+          progress,
+          progress_updated_at: new Date().toISOString(),
+          last_progress_message: message,
+        };
+
+        await this.db.db
+          .update(jobs)
+          .set({
+            metadata: updatedMetadata,
+            updatedAt: new Date(),
+          })
+          .where(eq(jobs.id, jobId));
+      }
+    } catch (error) {
+      this.logger.error(`Failed to update job ${jobId} progress:`, error);
+      // Don't fail the request, just log error
+    }
+
+    this.logger.log(
+      `Agent ${context.agentId} job ${jobId} progress: ${progress}%`,
+    );
+
+    return {
+      type: 'job_progress_ack',
+      job_id: jobId,
+      progress,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   private markConnected(agentId: string): void {
-    this.socketCountByAgent.set(agentId, (this.socketCountByAgent.get(agentId) ?? 0) + 1);
+    this.socketCountByAgent.set(
+      agentId,
+      (this.socketCountByAgent.get(agentId) ?? 0) + 1,
+    );
   }
 
   private markDisconnected(agentId: string): void {

@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { and, eq, isNull, lt } from 'drizzle-orm';
 
 import { DatabaseService } from '../database/database.service';
@@ -39,7 +44,12 @@ export class PairingCleanupService implements OnModuleInit, OnModuleDestroy {
       await this.db.db
         .update(agentSessions)
         .set({ revokedAt: now })
-        .where(and(lt(agentSessions.expiresAt, now), isNull(agentSessions.revokedAt)));
+        .where(
+          and(
+            lt(agentSessions.expiresAt, now),
+            isNull(agentSessions.revokedAt),
+          ),
+        );
 
       this.logger.debug('Pairing/session cleanup completed');
     } catch (error: unknown) {

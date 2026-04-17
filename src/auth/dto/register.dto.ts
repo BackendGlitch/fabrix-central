@@ -13,13 +13,13 @@ import {
 export class RegisterDto {
   @IsEmail()
   email!: string;
-  
+
   @IsString()
-  @MinLength(8, {message: 'Password must be at least 8 characters long'})
+  @MinLength(8, { message: 'Password must be at least 8 characters long' })
   password!: string;
 
   @IsString()
-  @IsNotEmpty({message: 'First name is required'})
+  @IsNotEmpty({ message: 'First name is required' })
   name!: string;
 
   @IsIn(PUBLIC_REGISTRATION_ROLES, {
