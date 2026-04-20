@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Put,
+  Post,
   Param,
   UseGuards,
   Req,
@@ -14,6 +15,11 @@ import { JobsService } from '../customer/jobs/jobs.service';
 import { JwtAuthGuard, RolesGuard } from '../auth/guards/index';
 import { Roles } from '../auth/decorators/index';
 import { ListJobsResponseDto, JobDetailDto } from '../customer/jobs/dto/index';
+import { AgentGateway } from '../ws/agent.gateway';
+import { CommandsService, CommandType } from '../agent/commands.service';
+import { DatabaseService } from '../database/database.service';
+import { eq } from 'drizzle-orm';
+import { jobs } from '../database/schema';
 
 interface AuthUser {
   userId: string;
@@ -34,7 +40,12 @@ interface UpdateJobStatusDto {
 
 @Controller('owner/jobs')
 export class OwnerJobsController {
-  constructor(private readonly jobsService: JobsService) {}
+  constructor(
+    private readonly jobsService: JobsService,
+    private readonly agentGateway: AgentGateway,
+    private readonly commands: CommandsService,
+    private readonly db: DatabaseService,
+  ) {}
 
   /**
    * GET /owner/jobs/pending
@@ -129,5 +140,143 @@ export class OwnerJobsController {
 
     // Reject job - set status to pending and clear printer assignment
     return this.jobsService.updateJobStatus(jobId, 'pending', user.userId);
+  }
+
+  /**
+   * POST /owner/jobs/:id/start
+   * OWNER-ONLY - Send start command to agent for a queued job
+   */
+  @Post(':id/start')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  async startJob(@Param('id') jobId: string, @Req() req: Request) {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    // Verify job exists and is assigned to this owner
+    const [job] = await this.db.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new BadRequestException('Job not found');
+    }
+
+    if (!job.printerId) {
+      throw new BadRequestException('Job is not assigned to a printer');
+    }
+
+    const { correlationId, sent } = await this.agentGateway.sendCommand(
+      job.printerId,
+      jobId,
+      'start',
+      { jobId },
+    );
+
+    return {
+      message: sent
+        ? 'Start command sent to agent'
+        : 'Start command queued (agent not connected)',
+      correlationId,
+      sent,
+    };
+  }
+
+  /**
+   * POST /owner/jobs/:id/pause
+   * OWNER-ONLY - Send pause command to agent for a printing job
+   */
+  @Post(':id/pause')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  async pauseJob(@Param('id') jobId: string, @Req() req: Request) {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const [job] = await this.db.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new BadRequestException('Job not found');
+    }
+
+    if (!job.printerId) {
+      throw new BadRequestException('Job is not assigned to a printer');
+    }
+
+    if (job.status !== 'printing') {
+      throw new BadRequestException('Job is not currently printing');
+    }
+
+    const { correlationId, sent } = await this.agentGateway.sendCommand(
+      job.printerId,
+      jobId,
+      'pause',
+      { jobId },
+    );
+
+    return {
+      message: sent
+        ? 'Pause command sent to agent'
+        : 'Pause command queued (agent not connected)',
+      correlationId,
+      sent,
+    };
+  }
+
+  /**
+   * POST /owner/jobs/:id/cancel
+   * OWNER-ONLY - Send cancel command to agent
+   */
+  @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('OWNER')
+  async cancelJob(@Param('id') jobId: string, @Req() req: Request) {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    const [job] = await this.db.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new BadRequestException('Job not found');
+    }
+
+    if (!job.printerId) {
+      throw new BadRequestException('Job is not assigned to a printer');
+    }
+
+    if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+      throw new BadRequestException('Job is already completed');
+    }
+
+    const { correlationId, sent } = await this.agentGateway.sendCommand(
+      job.printerId,
+      jobId,
+      'cancel',
+      { jobId },
+    );
+
+    return {
+      message: sent
+        ? 'Cancel command sent to agent'
+        : 'Cancel command queued (agent not connected)',
+      correlationId,
+      sent,
+    };
   }
 }

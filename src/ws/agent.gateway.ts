@@ -12,6 +12,7 @@ import { Logger, OnModuleInit } from '@nestjs/common';
 import type { IncomingMessage } from 'http';
 import { AgentAuthService } from '../agent-auth/agent-auth.service';
 import { DatabaseService } from '../database/database.service';
+import { CommandsService, CommandType } from '../agent/commands.service';
 
 import { eq } from 'drizzle-orm';
 import { jobs } from '../database/schema';
@@ -43,6 +44,7 @@ export class AgentGateway
   constructor(
     private readonly agentAuth: AgentAuthService,
     private readonly db: DatabaseService,
+    private readonly commands: CommandsService,
   ) {}
 
   onModuleInit() {
@@ -219,8 +221,122 @@ export class AgentGateway
   }
 
   /**
-   * Assign a job to an agent
+   * Send a command to an agent with correlation ID tracking
    */
+  async sendCommand(
+    agentId: string,
+    jobId: string,
+    commandType: CommandType,
+    payload?: Record<string, unknown>,
+  ): Promise<{ correlationId: string; sent: boolean }> {
+    // Create command record in database
+    const commandRecord = await this.commands.sendCommand({
+      agentId,
+      jobId,
+      commandType,
+      payload,
+    });
+
+    // Send message to agent
+    const sent = this.sendToAgent(agentId, {
+      type: 'command',
+      correlationId: commandRecord.correlationId,
+      commandType,
+      jobId,
+      payload,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (!sent) {
+      this.logger.warn(
+        `[COMMAND SEND FAILED] correlationId=${commandRecord.correlationId} agentId=${agentId} - agent not connected`,
+      );
+    }
+
+    return {
+      correlationId: commandRecord.correlationId,
+      sent,
+    };
+  }
+
+  /**
+   * Handle command acknowledgment from agent
+   */
+  @SubscribeMessage('command_ack')
+  async handleCommandAck(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
+    const context = this.contexts.get(client);
+    if (!context) {
+      this.logger.warn('Received command_ack from unauthorized client');
+      return { type: 'error', message: 'Unauthorized' };
+    }
+
+    const { correlationId } = data;
+    if (!correlationId) {
+      this.logger.warn(
+        `[COMMAND ACK INVALID] agentId=${context.agentId} - no correlationId provided`,
+      );
+      return { type: 'error', message: 'correlationId is required' };
+    }
+
+    try {
+      const command = await this.commands.acknowledgeCommand(correlationId);
+      this.logger.log(
+        `[COMMAND ACK SUCCESS] correlationId=${correlationId} agentId=${context.agentId} jobId=${command.jobId}`,
+      );
+      return {
+        type: 'command_ack_received',
+        correlationId,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `[COMMAND ACK FAILED] correlationId=${correlationId} - ${error}`,
+      );
+      return { type: 'error', message: `Failed to acknowledge command: ${error}` };
+    }
+  }
+
+  /**
+   * Handle command failure notification from agent
+   */
+  @SubscribeMessage('command_error')
+  async handleCommandError(
+    @MessageBody() data: any,
+    @ConnectedSocket() client: WebSocket,
+  ) {
+    const context = this.contexts.get(client);
+    if (!context) {
+      return { type: 'error', message: 'Unauthorized' };
+    }
+
+    const { correlationId, errorMessage } = data;
+    if (!correlationId) {
+      return { type: 'error', message: 'correlationId is required' };
+    }
+
+    try {
+      const command = await this.commands.failCommand(
+        correlationId,
+        errorMessage || 'Unknown error',
+      );
+      this.logger.error(
+        `[COMMAND ERROR RECORDED] correlationId=${correlationId} agentId=${context.agentId} error="${errorMessage}"`,
+      );
+      return {
+        type: 'command_error_received',
+        correlationId,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `[COMMAND ERROR TRACKING FAILED] correlationId=${correlationId} - ${error}`,
+      );
+      return { type: 'error', message: `Failed to record command error: ${error}` };
+    }
+  }
   assignJobToAgent(agentId: string, job: any): boolean {
     return this.sendToAgent(agentId, {
       type: 'job_assigned',

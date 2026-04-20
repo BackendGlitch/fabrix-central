@@ -138,7 +138,6 @@ export class JobsService {
     }
 
     // Pick the most recently seen agent
-    // In a real implementation, you might check WebSocket connectivity via AgentGateway
     return activeAgents[0].id;
   }
 
@@ -177,11 +176,11 @@ export class JobsService {
    * Count pending jobs for an owner
    */
   async countPendingJobsForOwner(ownerId: string): Promise<number> {
-    // Get all agents belonging to this owner
+    // Get all agents belonging to this owner (including revoked ones)
     const ownerAgents = await this.db.db
       .select({ id: agents.id })
       .from(agents)
-      .where(and(eq(agents.ownerId, ownerId), eq(agents.status, 'active')));
+      .where(eq(agents.ownerId, ownerId));
 
     if (ownerAgents.length === 0) {
       return 0;
@@ -308,9 +307,6 @@ export class JobsService {
         agent.ownerId,
         pendingCount,
         pendingJob ?? undefined,
-      );
-      this.logger.log(
-        `Notified owner ${agent.ownerId} about ${pendingCount} pending jobs`,
       );
     } catch (error) {
       this.logger.error(`Failed to notify owner about pending job:`, error);
@@ -474,7 +470,7 @@ export class JobsService {
       .from(jobs)
       .innerJoin(jobFiles, eq(jobs.fileId, jobFiles.id))
       .where(eq(jobs.customerId, customerId))
-      .orderBy(jobs.createdAt);
+      .orderBy(desc(jobs.createdAt));
 
     const jobList: JobDetailDto[] = rows.map((row) => ({
       id: row.id,
@@ -571,7 +567,7 @@ export class JobsService {
     const ownerAgents = await this.db.db
       .select({ id: agents.id })
       .from(agents)
-      .where(and(eq(agents.ownerId, ownerId), eq(agents.status, 'active')));
+      .where(eq(agents.ownerId, ownerId));
 
     if (ownerAgents.length === 0) {
       return { jobs: [], count: 0 };
@@ -580,6 +576,7 @@ export class JobsService {
     const agentIds = ownerAgents.map((agent) => agent.id);
 
     // Get jobs with pending_owner_approval status for these agents
+    // Use INNER JOIN with agents to get printer display name
     const rows = await this.db.db
       .select({
         id: jobs.id,
@@ -612,7 +609,7 @@ export class JobsService {
           eq(jobs.status, 'pending_owner_approval'),
         ),
       )
-      .orderBy(jobs.createdAt);
+      .orderBy(desc(jobs.createdAt));
 
     const jobList: JobDetailDto[] = rows.map((row) => ({
       id: row.id,
@@ -792,6 +789,52 @@ export class JobsService {
       completedAt: updatedJob[0].completedAt,
       createdAt: updatedJob[0].createdAt,
       updatedAt: updatedJob[0].updatedAt,
+    };
+  }
+
+  /**
+   * Cancel a job (customer can only cancel pending_owner_approval, pending, or queued jobs)
+   */
+  async cancelCustomerJob(
+    jobId: string,
+    customerId: string,
+  ): Promise<{ message: string; job: JobDetailDto }> {
+    // Verify job exists and belongs to customer
+    const jobRow = await this.db.db
+      .select({
+        id: jobs.id,
+        customerId: jobs.customerId,
+        status: jobs.status,
+        printerId: jobs.printerId,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!jobRow[0]) {
+      throw new NotFoundException('Job not found');
+    }
+
+    if (jobRow[0].customerId !== customerId) {
+      throw new ForbiddenException('Not authorized to cancel this job');
+    }
+
+    const currentStatus = jobRow[0].status;
+
+    // Can only cancel jobs that are pending approval, pending, or queued
+    const cancellableStatuses = ['pending_owner_approval', 'pending', 'queued'];
+    if (!cancellableStatuses.includes(currentStatus)) {
+      throw new BadRequestException(
+        `Cannot cancel job with status: ${currentStatus}. Can only cancel jobs that are pending approval, approved, or queued.`,
+      );
+    }
+
+    // Update job status to cancelled
+    const cancelledJob = await this.updateJobStatus(jobId, 'cancelled');
+
+    return {
+      message: 'Job cancelled successfully',
+      job: cancelledJob,
     };
   }
 }

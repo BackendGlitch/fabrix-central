@@ -253,3 +253,50 @@ export const jobs = pgTable(
     index('jobs_created_at_idx').on(table.createdAt),
   ],
 );
+
+export const commandStateEnum = pgEnum('command_state', [
+  'sent',
+  'acked',
+  'failed',
+  'timeout',
+]);
+
+export const commandTypeEnum = pgEnum('command_type', [
+  'start',
+  'pause',
+  'cancel',
+]);
+
+export const agentCommands = pgTable(
+  'agent_commands',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    correlationId: varchar('correlation_id', { length: 36 }).notNull(), // UUID format
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    commandType: commandTypeEnum('command_type').notNull(),
+    state: commandStateEnum('state').default('sent').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    errorMessage: text('error_message'),
+    ackedAt: timestamp('acked_at', { withTimezone: true }),
+    sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index('agent_commands_correlation_id_idx').on(table.correlationId),
+    index('agent_commands_agent_id_idx').on(table.agentId),
+    index('agent_commands_job_id_idx').on(table.jobId),
+    index('agent_commands_state_idx').on(table.state),
+    index('agent_commands_sent_at_idx').on(table.sentAt),
+  ],
+);

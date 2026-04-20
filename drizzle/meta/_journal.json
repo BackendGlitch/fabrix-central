@@ -50,6 +50,13 @@
       "when": 1776382151385,
       "tag": "0006_tough_overlord",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776720013287,
+      "tag": "0007_nappy_vapor",
+      "breakpoints": true
     }
   ]
 }
