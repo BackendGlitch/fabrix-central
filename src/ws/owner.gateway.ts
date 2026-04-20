@@ -302,13 +302,25 @@ export class OwnerGateway
     }
 
     // Check query parameter (e.g., ws://...?token=...)
-    const url = request.url
-      ? new URL(request.url, `http://${request.headers.host}`)
-      : null;
-    if (url) {
-      const token = url.searchParams.get('token');
-      if (token) {
-        return token.trim();
+    if (request.url) {
+      try {
+        // Parse the URL - request.url is typically just the path and query string
+        // e.g., "/ws/owner?token=xyz"
+        const url = new URL(
+          request.url,
+          `http://${request.headers.host || 'localhost:4000'}`,
+        );
+        const token = url.searchParams.get('token');
+        if (token) {
+          const trimmedToken = token.trim();
+          if (trimmedToken) {
+            return trimmedToken;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to parse WebSocket URL: ${request.url}`,
+        );
       }
     }
 

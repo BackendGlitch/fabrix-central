@@ -108,4 +108,23 @@ export class JobsController {
 
     return this.jobsService.getJobDetail(jobId, user.userId);
   }
+
+  /**
+   * POST /customer/jobs/:id/cancel
+   * CUSTOMER-ONLY - Cancel a job (only if not already completed/failed)
+   */
+  @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CUSTOMER')
+  async cancelJob(
+    @Param('id') jobId: string,
+    @Req() req: Request,
+  ): Promise<{ message: string; job: JobDetailDto }> {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    return this.jobsService.cancelCustomerJob(jobId, user.userId);
+  }
 }

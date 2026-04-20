@@ -5,6 +5,7 @@ import { AgentGateway } from './agent.gateway';
 import { OwnerGateway } from './owner.gateway';
 import { AgentAuthModule } from '../agent-auth/agent-auth.module';
 import { DatabaseModule } from '../database/database.module';
+import { CommandsService } from '../agent/commands.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { DatabaseModule } from '../database/database.module';
     AgentAuthModule,
     DatabaseModule,
   ],
-  providers: [AgentGateway, OwnerGateway],
-  exports: [AgentGateway, OwnerGateway],
+  providers: [AgentGateway, OwnerGateway, CommandsService],
+  exports: [AgentGateway, OwnerGateway, CommandsService],
 })
 export class WsModule {}
