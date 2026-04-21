@@ -91,6 +91,25 @@ export class JobsController {
   }
 
   /**
+   * GET /customer/jobs/:id/tracking
+   * CUSTOMER-ONLY - Get job tracking history and current snapshot
+   */
+  @Get(':id/tracking')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('CUSTOMER')
+  async getJobTracking(
+    @Param('id') jobId: string,
+    @Req() req: Request,
+  ): Promise<any> {
+    const user = req.user as AuthUser;
+    if (!user || !user.userId) {
+      throw new BadRequestException('User not authenticated');
+    }
+
+    return this.jobsService.getJobTracking(jobId, user.userId);
+  }
+
+  /**
    * GET /customer/jobs/:id
    * CUSTOMER-ONLY - Get job details (with ownership check)
    */

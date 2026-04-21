@@ -245,6 +245,146 @@ export class OwnerGateway
   }
 
   /**
+   * AG-11: Broadcast job progress updates to owner
+   */
+  broadcastJobProgress(
+    ownerId: string,
+    jobId: string,
+    progressData: {
+      progress: number;
+      currentLayer: number;
+      totalLayers: number;
+      etaMinutes: number;
+      message?: string;
+      timestamp: string;
+    },
+  ): boolean {
+    const connections = this.ownerConnections.get(ownerId);
+    if (!connections || connections.length === 0) {
+      return false;
+    }
+
+    const message = {
+      type: 'job_progress_update',
+      jobId,
+      progress: progressData.progress,
+      currentLayer: progressData.currentLayer,
+      totalLayers: progressData.totalLayers,
+      etaMinutes: progressData.etaMinutes,
+      message: progressData.message,
+      timestamp: progressData.timestamp,
+    };
+
+    const messageStr = JSON.stringify(message);
+    let sentCount = 0;
+
+    for (const client of connections) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(messageStr);
+          sentCount++;
+        } catch (error) {
+          this.logger.debug(
+            `Failed to send progress to owner ${ownerId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    return sentCount > 0;
+  }
+
+  /**
+   * AG-11: Broadcast job completion to owner
+   */
+  broadcastJobCompletion(
+    ownerId: string,
+    jobId: string,
+    status: string,
+  ): boolean {
+    const connections = this.ownerConnections.get(ownerId);
+    if (!connections || connections.length === 0) {
+      return false;
+    }
+
+    const message = {
+      type: 'job_completed',
+      jobId,
+      status,
+      timestamp: new Date().toISOString(),
+      message: `Job ${jobId} has completed successfully`,
+    };
+
+    const messageStr = JSON.stringify(message);
+    let sentCount = 0;
+
+    for (const client of connections) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(messageStr);
+          sentCount++;
+        } catch (error) {
+          this.logger.debug(
+            `Failed to send completion to owner ${ownerId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    this.logger.log(
+      `Notified owner ${ownerId} about job ${jobId} completion (sent to ${sentCount} connection${sentCount === 1 ? '' : 's'})`,
+    );
+    return sentCount > 0;
+  }
+
+  /**
+   * AG-11: Broadcast job failure to owner
+   */
+  broadcastJobFailure(
+    ownerId: string,
+    jobId: string,
+    errorMessage: string,
+  ): boolean {
+    const connections = this.ownerConnections.get(ownerId);
+    if (!connections || connections.length === 0) {
+      return false;
+    }
+
+    const message = {
+      type: 'job_failed',
+      jobId,
+      status: 'failed',
+      errorMessage,
+      timestamp: new Date().toISOString(),
+      message: `Job ${jobId} failed: ${errorMessage}`,
+    };
+
+    const messageStr = JSON.stringify(message);
+    let sentCount = 0;
+
+    for (const client of connections) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(messageStr);
+          sentCount++;
+        } catch (error) {
+          this.logger.debug(
+            `Failed to send failure to owner ${ownerId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    this.logger.log(
+      `Notified owner ${ownerId} about job ${jobId} failure (sent to ${sentCount} connection${sentCount === 1 ? '' : 's'})`,
+    );
+    return sentCount > 0;
+  }
+
+  /**
    * Get all connected owner IDs
    */
   getConnectedOwnerIds(): string[] {

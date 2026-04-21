@@ -16,7 +16,7 @@ import { pipeline } from 'stream';
 import { DatabaseService } from '../../database/database.service';
 import { AgentGateway } from '../../ws/agent.gateway';
 import { OwnerGateway } from '../../ws/owner.gateway';
-import { jobs, jobFiles, agents, users } from '../../database/schema';
+import { jobs, jobFiles, agents, users, jobEvents } from '../../database/schema';
 import {
   UploadSTLResponseDto,
   CreateJobRequestDto,
@@ -837,4 +837,81 @@ export class JobsService {
       job: cancelledJob,
     };
   }
+
+  /**
+   * CS-11: Get job tracking history and current snapshot
+   * Returns current progress snapshot and ordered timeline of events
+   */
+  async getJobTracking(
+    jobId: string,
+    customerId: string,
+  ): Promise<{
+    current: {
+      progress: number;
+      status: string;
+      currentLayer: number;
+      totalLayers: number;
+      etaMinutes: number;
+      timestamp: string;
+    };
+    timeline: Array<{
+      type: string;
+      data: any;
+      createdAt: string;
+    }>;
+  }> {
+    // Verify job exists and belongs to customer
+    const jobRow = await this.db.db
+      .select({
+        id: jobs.id,
+        customerId: jobs.customerId,
+        status: jobs.status,
+        metadata: jobs.metadata,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!jobRow[0]) {
+      throw new NotFoundException('Job not found');
+    }
+
+    if (jobRow[0].customerId !== customerId) {
+      throw new ForbiddenException('Not authorized to access this job tracking');
+    }
+
+    // Get current progress snapshot from job metadata
+    const metadata = jobRow[0].metadata || {};
+    const current = {
+      progress: (metadata.progress as number) ?? 0,
+      status: jobRow[0].status,
+      currentLayer: (metadata.current_layer as number) ?? 0,
+      totalLayers: (metadata.total_layers as number) ?? 0,
+      etaMinutes: (metadata.eta_minutes as number) ?? 0,
+      timestamp: (metadata.progress_updated_at as string) ?? new Date().toISOString(),
+    };
+
+    // Get ordered timeline of all events from job_events table
+    const events = await this.db.db
+      .select({
+        type: jobEvents.type,
+        data: jobEvents.data,
+        createdAt: jobEvents.createdAt,
+      })
+      .from(jobEvents)
+      .where(eq(jobEvents.jobId, jobId))
+      .orderBy(desc(jobEvents.createdAt));
+
+    const timeline = events.map(event => ({
+      type: event.type,
+      data: event.data,
+      createdAt: event.createdAt.toISOString(),
+    }));
+
+    return {
+      current,
+      timeline,
+    };
+  }
 }
+
