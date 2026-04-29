@@ -5,7 +5,12 @@
 
 const postgres = require('postgres');
 
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_MKpo28GmUrbx@ep-empty-rain-ale5i0yo-pooler.c-3.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  console.error('ERROR: DATABASE_URL environment variable is not set');
+  process.exit(1);
+}
 
 async function checkDatabase() {
   const sql = postgres(databaseUrl, { ssl: 'require' });

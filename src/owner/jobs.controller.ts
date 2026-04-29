@@ -104,7 +104,7 @@ export class OwnerJobsController {
 
   /**
    * PUT /owner/jobs/:id/approve
-   * OWNER-ONLY - Approve job and move to pending/queued
+   * OWNER-ONLY - Approve job and move to queued
    */
   @Put(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -118,6 +118,23 @@ export class OwnerJobsController {
       throw new BadRequestException('User not authenticated');
     }
 
+    // Verify job is in pending_owner_approval status before allowing approval
+    const [job] = await this.db.db
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new BadRequestException('Job not found');
+    }
+
+    if (job.status !== 'pending_owner_approval') {
+      throw new BadRequestException(
+        `Cannot approve job with status '${job.status}'. Job must be pending owner approval.`,
+      );
+    }
+
     // Approve job by moving it to queued (will be picked up by agent)
     return this.jobsService.updateJobStatus(jobId, 'queued', user.userId);
   }
@@ -125,6 +142,7 @@ export class OwnerJobsController {
   /**
    * PUT /owner/jobs/:id/reject
    * OWNER-ONLY - Reject job (move back to queue with different printer)
+   * ISSUE #6: Validate job is awaiting approval before allowing rejection
    */
   @Put(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -138,7 +156,24 @@ export class OwnerJobsController {
       throw new BadRequestException('User not authenticated');
     }
 
-    // Reject job - set status to pending and clear printer assignment
+    // Verify job is in pending_owner_approval status before allowing rejection
+    const [job] = await this.db.db
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      throw new BadRequestException('Job not found');
+    }
+
+    if (job.status !== 'pending_owner_approval') {
+      throw new BadRequestException(
+        `Cannot reject job with status '${job.status}'. Job must be pending owner approval.`,
+      );
+    }
+
+    // Reject job - set status to pending and clear printer assignment (will be reassigned)
     return this.jobsService.updateJobStatus(jobId, 'pending', user.userId);
   }
 

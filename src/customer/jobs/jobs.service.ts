@@ -16,7 +16,9 @@ import { pipeline } from 'stream';
 import { DatabaseService } from '../../database/database.service';
 import { AgentGateway } from '../../ws/agent.gateway';
 import { OwnerGateway } from '../../ws/owner.gateway';
+import { FrontendGateway } from '../../ws/frontend.gateway';
 import { jobs, jobFiles, agents, users, jobEvents } from '../../database/schema';
+import { validateJobStatusTransition } from '../../common/job-status.utils';
 import {
   UploadSTLResponseDto,
   CreateJobRequestDto,
@@ -36,6 +38,7 @@ export class JobsService {
     private readonly configService: ConfigService,
     private readonly agentGateway: AgentGateway,
     private readonly ownerGateway: OwnerGateway,
+    private readonly frontendGateway: FrontendGateway,
   ) {
     this.uploadsDir =
       this.configService.get('JOBS_UPLOAD_DIR') || './uploads/jobs';
@@ -43,6 +46,21 @@ export class JobsService {
 
   private readonly uploadsDir: string;
   private readonly maxFileSize = 500 * 1024 * 1024; // 500MB
+
+  /**
+   * Validate if a status transition is allowed
+   */
+  private validateStatusTransition(
+    fromStatus: string,
+    toStatus: string,
+  ): void {
+    try {
+      validateJobStatusTransition(fromStatus, toStatus);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(message);
+    }
+  }
 
   /**
    * Upload an STL file
@@ -137,8 +155,122 @@ export class JobsService {
       return null;
     }
 
-    // Pick the most recently seen agent
-    return activeAgents[0].id;
+    // Find the first agent that is actually connected
+    for (const agent of activeAgents) {
+      if (this.agentGateway.isAgentConnected(agent.id)) {
+        this.logger.debug(
+          `Selected connected agent ${agent.id} for job assignment`,
+        );
+        return agent.id;
+      }
+    }
+
+    // No connected agents available
+    this.logger.warn(
+      `No connected agents available (${activeAgents.length} active but offline)`,
+    );
+    return null;
+  }
+
+  /**
+   * Find an available printer/agent, excluding a specific one (for reassignment)
+   */
+  private async findAvailablePrinterExcluding(
+    excludePrinterId?: string,
+  ): Promise<string | null> {
+    // Find active agents
+    const activeAgents = await this.db.db
+      .select({
+        id: agents.id,
+        lastSeenAt: agents.lastSeenAt,
+      })
+      .from(agents)
+      .where(eq(agents.status, 'active'))
+      .orderBy(desc(agents.lastSeenAt));
+
+    if (activeAgents.length === 0) {
+      return null;
+    }
+
+    // Find the first agent that is actually connected, excluding the specified one
+    for (const agent of activeAgents) {
+      if (
+        agent.id !== excludePrinterId &&
+        this.agentGateway.isAgentConnected(agent.id)
+      ) {
+        this.logger.debug(
+          `Selected connected agent ${agent.id} for job reassignment`,
+        );
+        return agent.id;
+      }
+    }
+
+    // No other connected agents available
+    this.logger.warn(
+      `No other connected agents available for reassignment (excluding ${excludePrinterId})`,
+    );
+    return null;
+  }
+
+  /**
+   * Handle rejected job - attempt to reassign to another printer
+   * Returns the new printerId if reassigned, null if no printers available
+   */
+  private async handleRejectedJob(
+    jobId: string,
+    customerId: string,
+    rejectedPrinterId: string,
+  ): Promise<string | null> {
+    try {
+      // Find another available printer (excluding the one that rejected it)
+      const newPrinterId = await this.findAvailablePrinterExcluding(
+        rejectedPrinterId,
+      );
+
+      if (!newPrinterId) {
+        this.logger.log(
+          `No available printers to reassign job ${jobId} after rejection by ${rejectedPrinterId}`,
+        );
+        // Notify customer that job was rejected and no printers available
+        this.frontendGateway.broadcastJobStatusChange(
+          customerId,
+          jobId,
+          'pending',
+          'Your job was rejected by the previous printer. No other printers are currently available. Please try again later.',
+        );
+        return null;
+      }
+
+      // Reassign to new printer and set status to pending_owner_approval
+      await this.db.db
+        .update(jobs)
+        .set({
+          printerId: newPrinterId,
+          status: 'pending_owner_approval',
+          updatedAt: new Date(),
+        })
+        .where(eq(jobs.id, jobId));
+
+      this.logger.log(
+        `Reassigned rejected job ${jobId} from ${rejectedPrinterId} to ${newPrinterId}`,
+      );
+
+      // Notify owner about the reassigned job
+      await this.notifyOwnerAboutPendingJob(newPrinterId, jobId);
+
+      // Notify customer that job was rejected but reassigned
+      this.frontendGateway.broadcastJobStatusChange(
+        customerId,
+        jobId,
+        'pending_owner_approval',
+        'Your job was rejected by the previous printer but has been reassigned to another printer for approval.',
+      );
+
+      return newPrinterId;
+    } catch (error) {
+      this.logger.error(`Failed to handle rejected job ${jobId}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -170,6 +302,29 @@ export class JobsService {
     estimatedSeconds = Math.max(estimatedSeconds, 600); // At least 10 minutes
 
     return Math.round(estimatedSeconds);
+  }
+
+  /**
+   * Get all queued jobs assigned to an agent (for reconnection)
+   */
+  async getQueuedJobsForAgent(agentId: string): Promise<any[]> {
+    const queuedJobs = await this.db.db
+      .select({
+        id: jobs.id,
+        name: jobs.name,
+        fileId: jobs.fileId,
+        metadata: jobs.metadata,
+      })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.printerId, agentId),
+          eq(jobs.status, 'queued'),
+        ),
+      )
+      .orderBy(desc(jobs.createdAt));
+
+    return queuedJobs;
   }
 
   /**
@@ -650,28 +805,129 @@ export class JobsService {
     status: string,
     ownerId?: string,
   ): Promise<JobDetailDto> {
+    // Fetch job details first for rejection handling
+    let currentJobStatus: string;
+    let currentPrinterId: string | null;
+    let customerId: string;
+
+    const jobRow = await this.db.db
+      .select({
+        status: jobs.status,
+        printerId: jobs.printerId,
+        customerId: jobs.customerId,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!jobRow[0]) {
+      throw new NotFoundException('Job not found');
+    }
+
+    currentJobStatus = jobRow[0].status;
+    currentPrinterId = jobRow[0].printerId;
+    customerId = jobRow[0].customerId;
+
     // Verify ownership if ownerId provided
     if (ownerId) {
-      const job = await this.db.db
-        .select({ printerId: jobs.printerId })
-        .from(jobs)
-        .where(eq(jobs.id, jobId))
-        .limit(1);
-
-      if (!job[0] || !job[0].printerId) {
+      if (!currentPrinterId) {
         throw new NotFoundException('Job not found or no printer assigned');
       }
+
+      // Validate status transition
+      this.validateStatusTransition(currentJobStatus, status);
 
       // Check if printer belongs to owner
       const printer = await this.db.db
         .select({ ownerId: agents.ownerId })
         .from(agents)
-        .where(eq(agents.id, job[0].printerId))
+        .where(eq(agents.id, currentPrinterId))
         .limit(1);
 
       if (!printer[0] || printer[0].ownerId !== ownerId) {
         throw new ForbiddenException('Not authorized to update this job');
       }
+    } else {
+      // If no ownerId, still validate transition
+      this.validateStatusTransition(currentJobStatus, status);
+    }
+
+    // Attempt to reassign to another printer instead of leaving job in limbo
+    if (
+      currentJobStatus === 'pending_owner_approval' &&
+      status === 'pending' &&
+      currentPrinterId
+    ) {
+      this.logger.log(
+        `Job ${jobId} rejected by owner - attempting to reassign to another printer`,
+      );
+      const reassignedPrinterId = await this.handleRejectedJob(
+        jobId,
+        customerId,
+        currentPrinterId,
+      );
+
+      // If reassignment succeeded, fetch and return the updated job
+      if (reassignedPrinterId) {
+        const reassignedJob = await this.db.db
+          .select({
+            id: jobs.id,
+            name: jobs.name,
+            description: jobs.description,
+            status: jobs.status,
+            fileId: jobs.fileId,
+            customerId: jobs.customerId,
+            printerId: jobs.printerId,
+            metadata: jobs.metadata,
+            startedAt: jobs.startedAt,
+            completedAt: jobs.completedAt,
+            createdAt: jobs.createdAt,
+            updatedAt: jobs.updatedAt,
+          })
+          .from(jobs)
+          .where(eq(jobs.id, jobId))
+          .limit(1);
+
+        if (reassignedJob[0]) {
+          const fileRow = await this.db.db
+            .select({
+              filename: jobFiles.filename,
+              originalName: jobFiles.originalName,
+              mimeType: jobFiles.mimeType,
+              size: jobFiles.size,
+              uploadedAt: jobFiles.uploadedAt,
+            })
+            .from(jobFiles)
+            .where(eq(jobFiles.id, reassignedJob[0].fileId))
+            .limit(1);
+
+          const file = fileRow[0];
+
+          return {
+            id: reassignedJob[0].id,
+            name: reassignedJob[0].name,
+            description: reassignedJob[0].description,
+            status: reassignedJob[0].status,
+            fileId: reassignedJob[0].fileId,
+            customerId: reassignedJob[0].customerId,
+            printerId: reassignedJob[0].printerId,
+            file: {
+              id: reassignedJob[0].fileId,
+              filename: file?.filename || '',
+              originalName: file?.originalName || '',
+              mimeType: file?.mimeType || '',
+              size: file?.size || '',
+              uploadedAt: file?.uploadedAt || new Date(),
+            },
+            metadata: reassignedJob[0].metadata,
+            startedAt: reassignedJob[0].startedAt,
+            completedAt: reassignedJob[0].completedAt,
+            createdAt: reassignedJob[0].createdAt,
+            updatedAt: reassignedJob[0].updatedAt,
+          };
+        }
+      }
+      // If reassignment failed, continue with normal pending status update
     }
 
     // Update job status and timestamps
@@ -766,6 +1022,24 @@ export class JobsService {
             ? 'rejected'
             : status.toLowerCase();
       await this.notifyOwnerAboutJobStatusUpdate(jobId, status, action);
+    }
+
+    if (status === 'queued') {
+      // Job was approved
+      this.frontendGateway.broadcastJobStatusChange(
+        customerId,
+        jobId,
+        'queued',
+        'Your job has been approved and is now in the print queue.',
+      );
+    } else if (status === 'pending') {
+      // Job was rejected (will be auto-reassigned by handleRejectedJob)
+      this.frontendGateway.broadcastJobStatusChange(
+        customerId,
+        jobId,
+        'pending',
+        'Your job was rejected by the printer owner. It will be reassigned to another printer.',
+      );
     }
 
     return {

@@ -40,7 +40,7 @@ export class FrontendGateway
   private messageSequence = 0; // Global sequence counter for reconnect-safe delivery
 
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -336,10 +336,36 @@ export class FrontendGateway
    * Internal helper: Extract JWT from request headers
    */
   private extractBearerToken(request: IncomingMessage): string | null {
+    // Check Authorization header first
     const auth = request.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
-      return null;
+    if (auth && auth.startsWith('Bearer ')) {
+      return auth.slice('Bearer '.length).trim() || null;
     }
-    return auth.slice(7);
+
+    // Check query parameter (e.g., wss://...?token=...)
+    // ISSUE #7: Support token in URL for browsers that can't set custom headers
+    if (request.url) {
+      try {
+        // Parse the URL - request.url is typically just the path and query string
+        // e.g., "/ws/frontend?token=xyz"
+        const url = new URL(
+          request.url,
+          `http://${request.headers.host || 'localhost:4000'}`,
+        );
+        const token = url.searchParams.get('token');
+        if (token) {
+          const trimmedToken = token.trim();
+          if (trimmedToken) {
+            return trimmedToken;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to parse WebSocket URL: ${request.url}`,
+        );
+      }
+    }
+
+    return null;
   }
 }

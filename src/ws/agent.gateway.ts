@@ -15,8 +15,9 @@ import { DatabaseService } from '../database/database.service';
 import { CommandsService, CommandType } from '../agent/commands.service';
 import { OwnerGateway } from './owner.gateway';
 import { FrontendGateway } from './frontend.gateway';
+import { validateJobStatusTransition } from '../common/job-status.utils';
 
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { jobs, agents, jobEvents } from '../database/schema';
 
 type AgentActivityState = 'idle' | 'working';
@@ -70,19 +71,23 @@ export class AgentGateway
         client.close(1008, 'Agent revoked');
         return;
       }
+      
+      // Set context BEFORE setting up listener to ensure it's available immediately
       this.contexts.set(client, context);
       this.markConnected(context.agentId);
       this.markActivity(context.agentId, 'idle');
       this.logger.log(`Agent connected: ${context.agentId}`);
 
-      // Set up message listener for raw WebSocket messages
+      // NOW set up message listener after context is registered
       client.on('message', (data: Buffer) => {
+        const ctx = this.contexts.get(client);
         try {
           const message = JSON.parse(data.toString());
           void this.handleMessage(client, message);
         } catch (error) {
+          const agentId = ctx?.agentId ?? 'unknown';
           this.logger.error(
-            `Failed to parse WebSocket message from ${context.agentId}: ${error}`,
+            `Failed to parse WebSocket message from ${agentId}: ${error}`,
           );
         }
       });
@@ -95,13 +100,14 @@ export class AgentGateway
    * Dispatch incoming WebSocket messages to appropriate handlers
    */
   private async handleMessage(client: WebSocket, message: any) {
+    const context = this.contexts.get(client);
     const messageType = message.type;
     if (!messageType) {
-      this.logger.warn('Received message without type field');
+      this.logger.warn(
+        `Received message without type field from agent`,
+      );
       return;
     }
-
-    this.logger.debug(`Received message type: ${messageType}`);
 
     let response: any;
 
@@ -200,8 +206,7 @@ export class AgentGateway
     }
   }
 
-  @SubscribeMessage('ping')
-  handlePing(@MessageBody() data: any, @ConnectedSocket() client: WebSocket) {
+  handlePing(data: any, client: WebSocket) {
     const context = this.contexts.get(client);
     if (!context) {
       return { type: 'error', message: 'Unauthorized' };
@@ -218,8 +223,7 @@ export class AgentGateway
     return { type: 'pong', timestamp: new Date().toISOString() };
   }
 
-  @SubscribeMessage('hello')
-  handleHello(@MessageBody() data: any, @ConnectedSocket() client: WebSocket) {
+  async handleHello(data: any, client: WebSocket) {
     const context = this.contexts.get(client);
     if (!context) {
       return { type: 'error', message: 'Unauthorized' };
@@ -236,6 +240,48 @@ export class AgentGateway
     void this.agentAuth.touchLastSeen(context.agentId).catch(err => 
       this.logger.error(`Failed to touch last seen for hello: ${err}`)
     );
+
+    // RECONNECTION RECOVERY: Send any queued jobs that were assigned while agent was offline
+    try {
+      const queuedJobs = await this.db.db
+        .select({
+          id: jobs.id,
+          name: jobs.name,
+          fileId: jobs.fileId,
+          metadata: jobs.metadata,
+        })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.printerId, context.agentId),
+            eq(jobs.status, 'queued'),
+          ),
+        )
+        .orderBy(desc(jobs.createdAt));
+
+      if (queuedJobs.length > 0) {
+        this.logger.log(
+          `Agent ${context.agentId} reconnected with ${queuedJobs.length} queued job(s)`,
+        );
+        for (const job of queuedJobs) {
+          try {
+            this.sendToAgent(context.agentId, {
+              type: 'job_assigned',
+              job,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (sendErr) {
+            this.logger.error(`Failed to send job to agent: ${sendErr}`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to recover queued jobs for agent ${context.agentId}: ${error}`,
+        error,
+      );
+    }
+
     return {
       type: 'hello_ack',
       node_id: nodeId,
@@ -244,11 +290,7 @@ export class AgentGateway
     };
   }
 
-  @SubscribeMessage('heartbeat')
-  handleHeartbeat(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: WebSocket,
-  ) {
+  handleHeartbeat(data: any, client: WebSocket) {
     const context = this.contexts.get(client);
     if (!context) {
       return { type: 'error', message: 'Unauthorized' };
@@ -485,6 +527,27 @@ export class AgentGateway
   }
 
   /**
+   * Check if a specific agent is currently connected
+   */
+  isAgentConnected(agentId: string): boolean {
+    if (!this.server?.clients) {
+      return false;
+    }
+
+    for (const client of this.server.clients) {
+      if (client.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      const context = this.contexts.get(client);
+      if (context?.agentId === agentId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Message handler for job acceptance from agent
    */
   @SubscribeMessage('job_accept')
@@ -500,6 +563,28 @@ export class AgentGateway
     const jobId = data?.job_id;
     if (!jobId) {
       return { type: 'error', message: 'Missing job_id' };
+    }
+
+    // Get current job status and validate transition
+    try {
+      const job = await this.db.db
+        .select({ status: jobs.status })
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (!job[0]) {
+        return { type: 'error', message: `Job ${jobId} not found` };
+      }
+
+      // Validate status transition: queued → printing
+      validateJobStatusTransition(job[0].status, 'printing');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Agent ${context.agentId} attempted invalid job_accept transition: ${errorMsg}`,
+      );
+      return { type: 'error', message: `Invalid status transition: ${errorMsg}` };
     }
 
     // Update job status to printing in database
@@ -548,6 +633,28 @@ export class AgentGateway
 
     if (!jobId) {
       return { type: 'error', message: 'Missing job_id' };
+    }
+
+    // Get current job status and validate transition
+    try {
+      const job = await this.db.db
+        .select({ status: jobs.status })
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (!job[0]) {
+        return { type: 'error', message: `Job ${jobId} not found` };
+      }
+
+      // Validate status transition: printing → completed/failed/cancelled
+      validateJobStatusTransition(job[0].status, status);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Agent ${context.agentId} attempted invalid job_complete transition to ${status}: ${errorMsg}`,
+      );
+      return { type: 'error', message: `Invalid status transition: ${errorMsg}` };
     }
 
     // Update job status in database
@@ -758,6 +865,28 @@ export class AgentGateway
       return { type: 'error', message: 'Missing job_id' };
     }
 
+    // Get current job status and validate transition to completed
+    try {
+      const job = await this.db.db
+        .select({ status: jobs.status })
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (!job[0]) {
+        return { type: 'error', message: `Job ${jobId} not found` };
+      }
+
+      // Validate status transition: printing → completed
+      validateJobStatusTransition(job[0].status, 'completed');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Agent ${context.agentId} attempted invalid job_done transition: ${errorMsg}`,
+      );
+      return { type: 'error', message: `Invalid status transition: ${errorMsg}` };
+    }
+
     try {
       // Update job status to completed
       await this.db.db
@@ -857,6 +986,28 @@ export class AgentGateway
 
     if (!jobId) {
       return { type: 'error', message: 'Missing job_id' };
+    }
+
+    // Get current job status and validate transition to failed
+    try {
+      const job = await this.db.db
+        .select({ status: jobs.status })
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (!job[0]) {
+        return { type: 'error', message: `Job ${jobId} not found` };
+      }
+
+      // Validate status transition: printing → failed
+      validateJobStatusTransition(job[0].status, 'failed');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Agent ${context.agentId} attempted invalid job_failed transition: ${errorMsg}`,
+      );
+      return { type: 'error', message: `Invalid status transition: ${errorMsg}` };
     }
 
     try {
