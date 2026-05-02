@@ -57,6 +57,13 @@
       "when": 1776720013287,
       "tag": "0007_nappy_vapor",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777748295055,
+      "tag": "0008_goofy_ben_parker",
+      "breakpoints": true
     }
   ]
 }
