@@ -6,6 +6,7 @@ import { WsModule } from './ws/ws.module';
 import { AuthModule } from './auth/auth.module';
 import { PairingModule } from './pairing/pairing.module';
 import { AgentAuthModule } from './agent-auth/agent-auth.module';
+import { AgentModule } from './agent/agent.module';
 import { CustomerModule } from './customer/customer.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { CustomerModule } from './customer/customer.module';
     DatabaseModule,
     AuthModule,
     AgentAuthModule,
+    AgentModule,
     PairingModule,
     CustomerModule,
     HealthModule,

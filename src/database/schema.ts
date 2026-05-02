@@ -267,6 +267,12 @@ export const commandTypeEnum = pgEnum('command_type', [
   'cancel',
 ]);
 
+export const jobEventTypeEnum = pgEnum('job_event_type', [
+  'progress',
+  'completed',
+  'failed',
+]);
+
 export const agentCommands = pgTable(
   'agent_commands',
   {
@@ -298,5 +304,27 @@ export const agentCommands = pgTable(
     index('agent_commands_job_id_idx').on(table.jobId),
     index('agent_commands_state_idx').on(table.state),
     index('agent_commands_sent_at_idx').on(table.sentAt),
+  ],
+);
+
+export const jobEvents = pgTable(
+  'job_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    type: jobEventTypeEnum('type').notNull(),
+    data: jsonb('data')
+      .$type<Record<string, unknown>>()
+      .notNull(), // Contains progress, layers, eta, error message, etc.
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('job_events_job_id_idx').on(table.jobId),
+    index('job_events_created_at_idx').on(table.createdAt),
+    index('job_events_type_idx').on(table.type),
   ],
 );
