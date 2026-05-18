@@ -8,6 +8,8 @@ import { PairingModule } from './pairing/pairing.module';
 import { AgentAuthModule } from './agent-auth/agent-auth.module';
 import { AgentModule } from './agent/agent.module';
 import { CustomerModule } from './customer/customer.module';
+import { PricingModule } from './pricing/pricing.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { CustomerModule } from './customer/customer.module';
     AgentModule,
     PairingModule,
     CustomerModule,
+    PricingModule,
+    WalletModule,
     HealthModule,
     WsModule,
   ],

@@ -10,6 +10,7 @@ export class PrinterDto {
   activityState!: 'idle' | 'working' | 'offline';
   lastHeartbeatAt!: Date | null;
   options?: PrinterOptionMetadataDto;
+  printerConfigId?: string;
 }
 
 export class ListCustomerPrintersResponseDto {

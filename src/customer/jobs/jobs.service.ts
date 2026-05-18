@@ -17,6 +17,7 @@ import { DatabaseService } from '../../database/database.service';
 import { AgentGateway } from '../../ws/agent.gateway';
 import { OwnerGateway } from '../../ws/owner.gateway';
 import { FrontendGateway } from '../../ws/frontend.gateway';
+import { WalletService } from '../../wallet/wallet.service';
 import { jobs, jobFiles, agents, users, jobEvents } from '../../database/schema';
 import { validateJobStatusTransition } from '../../common/job-status.utils';
 import {
@@ -39,6 +40,7 @@ export class JobsService {
     private readonly agentGateway: AgentGateway,
     private readonly ownerGateway: OwnerGateway,
     private readonly frontendGateway: FrontendGateway,
+    private readonly walletService: WalletService,
   ) {
     this.uploadsDir =
       this.configService.get('JOBS_UPLOAD_DIR') || './uploads/jobs';
@@ -1025,7 +1027,42 @@ export class JobsService {
     }
 
     if (status === 'queued') {
-      // Job was approved
+      // Job was approved - transfer credits to owner
+      try {
+        // Get job metadata for price
+        const jobMetadata = updatedJob[0].metadata || {};
+        const priceEstimate = jobMetadata.priceEstimate as number | undefined;
+
+        if (priceEstimate && priceEstimate > 0) {
+          // Get the printer owner
+          const printerOwner = await this.db.db
+            .select({ ownerId: agents.ownerId })
+            .from(agents)
+            .where(eq(agents.id, updatedJob[0].printerId!))
+            .limit(1);
+
+          if (printerOwner[0]?.ownerId) {
+            // Transfer credits from customer to owner
+            await this.walletService.transferToOwner({
+              fromUserId: customerId,
+              toUserId: printerOwner[0].ownerId,
+              amount: Math.ceil(priceEstimate),
+              jobId,
+              description: `Payout for completed job ${jobId}`,
+            });
+            this.logger.log(
+              `[Payout] Transferred ${Math.ceil(priceEstimate)} credits from customer ${customerId} to owner ${printerOwner[0].ownerId} for job ${jobId}`,
+            );
+          }
+        }
+      } catch (payoutError) {
+        this.logger.error(
+          `[Payout] Failed to transfer credits for job ${jobId}:`,
+          payoutError,
+        );
+        // Don't fail the job approval if payout fails - it can be handled manually
+      }
+
       this.frontendGateway.broadcastJobStatusChange(
         customerId,
         jobId,

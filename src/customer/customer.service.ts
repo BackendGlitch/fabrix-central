@@ -3,7 +3,7 @@ import { eq, isNull, and } from 'drizzle-orm';
 
 import { DatabaseService } from '../database/database.service';
 import { AgentGateway } from '../ws/agent.gateway';
-import { agents, agentSessions } from '../database/schema';
+import { agents, agentSessions, printerConfigs } from '../database/schema';
 import { ListCustomerPrintersResponseDto, PrinterDto } from './dto/index';
 
 @Injectable()
@@ -20,7 +20,7 @@ export class CustomerService {
    * Returns only ACTIVE agents that are currently ONLINE
    */
   async listAvailablePrinters(): Promise<ListCustomerPrintersResponseDto> {
-    // Fetch all active agents from all owners
+    // Fetch all active agents from all owners with their printer config
     const rows = await this.db.db
       .select({
         id: agents.id,
@@ -28,8 +28,10 @@ export class CustomerService {
         displayName: agents.displayName,
         status: agents.status,
         lastSeenAt: agents.lastSeenAt,
+        printerConfigId: printerConfigs.id,
       })
       .from(agents)
+      .leftJoin(printerConfigs, eq(printerConfigs.agentId, agents.id))
       .where(eq(agents.status, 'active'));
 
     // Get session metadata for each agent
@@ -72,6 +74,7 @@ export class CustomerService {
         activityState: runtime.activityState,
         lastHeartbeatAt: runtime.lastHeartbeatAt,
         options,
+        printerConfigId: agent.printerConfigId ?? undefined,
       });
     }
 

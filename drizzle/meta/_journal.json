@@ -64,6 +64,27 @@
       "when": 1777748295055,
       "tag": "0008_goofy_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779064565406,
+      "tag": "0009_married_iceman",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779068820687,
+      "tag": "0010_add_credits_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779071602259,
+      "tag": "0011_sharp_starbolt",
+      "breakpoints": true
     }
   ]
 }
