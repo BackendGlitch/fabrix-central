@@ -1,7 +1,4 @@
-ignoredBuiltDependencies:
-  - '@nestjs/core'
-  - esbuild
-  - unrs-resolver
-
 onlyBuiltDependencies:
+  - '@nestjs/core'
   - bcrypt
+  - esbuild
