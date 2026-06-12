@@ -8,6 +8,10 @@ primary_region = 'cdg'
 
 [experimental]
   auto_rollback = true
+  auto_start_machines = true
+
+# Keep at least 1 machine always running (prevents cold starts)
+min_machines_running = 1
 
 [build]
   dockerfile = 'Dockerfile'
