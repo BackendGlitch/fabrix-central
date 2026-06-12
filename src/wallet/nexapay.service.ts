@@ -13,7 +13,7 @@ export class NexaPayService {
   constructor(private readonly configService: ConfigService) {
     const apiKey =
       this.configService.get('NEXAPAY_API_KEY') ||
-      'nxp_developer_aa603022e4a1083809825a91_7e7a8be1';
+      'nxp_developer_86a0b653a09da64fb9091792_5d6e25cb';
 
     this.client = new NexaPay({
       apiKey,
