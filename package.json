@@ -8,6 +8,9 @@
   ],
   "private": true,
   "license": "UNLICENSED",
+  "pnpm": {
+    "onlyBuiltDependencies": ["@nestjs/core", "bcrypt", "esbuild"]
+  },
   "scripts": {
     "build": "nest build",
     "db:generate": "drizzle-kit generate",
