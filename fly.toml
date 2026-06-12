@@ -25,19 +25,21 @@ app = "fabrix-central"
 [env]
   PORT = "4000"
   NODE_ENV = "production"
-  DATABASE_URL = "postgresql://neondb_owner:npg_MKpo28GmUrbx@ep-empty-rain-ale5i0yo-pooler.c-3.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-  REDIS_URL = "rediss://default:gQAAAAAAAbMKAAIgcDJlNzdkNzI4ZmQ3MjY0MmE2OTdhZjRhYzFlZmRiODA0Yg@loved-tortoise-111370.upstash.io:6379"
-  JWT_ACCESS_SECRET = "jS+kTyoYnO0xGEIQh+F6yMmlTxPBc9G3HTIjgFv3PutDsiAGtL8NQrdiJlfR03rQ"
-  JWT_REFRESH_SECRET = "3kdBUO+TDCb8dsXgIL5UoNjpLzRlC71V089bwRsdI5lsc+pg5Ly6KzxtNUT92BM9"
   CORS_ORIGINS = "https://fabrix.sbs,https://www.fabrix.sbs,https://api.fabrix.sbs"
-  AGENT_JWT_ACCESS_SECRET = "7LwLBcL2XQ9NpYP5dkW0GUDsl2sfiRzPZkmsxCmDahxmpfXUnYD5Na87evlwDYKC"
-  AGENT_JWT_REFRESH_SECRET = "1QvUh9yV0HdKRzLRf+3vDeLunrCEjQcicZqH4vX+Wap5Hpj4huHjaTKVo8CR2lEW"
   AGENT_JWT_ACCESS_TTL = "15m"
   AGENT_JWT_REFRESH_TTL = "30d"
   AGENT_LOGIN_BASE_URL = "https://fabrix.sbs/agent/auth"
   APP_URL = "https://fabrix.sbs"
   API_URL = "https://api.fabrix.sbs"
-  NEXAPAY_API_KEY = "nxp_developer_aa603022e4a1083809825a91_7e7a8be1"
+
+# Secrets (set via fly secrets set):
+#   DATABASE_URL
+#   REDIS_URL
+#   JWT_ACCESS_SECRET
+#   JWT_REFRESH_SECRET
+#   AGENT_JWT_ACCESS_SECRET
+#   AGENT_JWT_REFRESH_SECRET
+#   NEXAPAY_API_KEY
 
 [experimental]
   allowed_public_ports = []

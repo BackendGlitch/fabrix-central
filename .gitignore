@@ -12,3 +12,4 @@ pnpm-debug.log*
 
 uploads/jobs/
 
+scripts/fly-secrets.sh
