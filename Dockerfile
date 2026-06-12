@@ -6,9 +6,8 @@ RUN npm install -g pnpm@latest
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-# pnpm v10 requires explicit approval of build scripts
-ENV PNPM_ONLY_BUILT_DEPENDENCIES="@nestjs/core bcrypt esbuild"
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts && \
+    pnpm rebuild @nestjs/core bcrypt esbuild
 
 COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src/ ./src/
@@ -23,8 +22,8 @@ RUN npm install -g pnpm@latest
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-ENV PNPM_ONLY_BUILT_DEPENDENCIES="@nestjs/core bcrypt"
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts && \
+    pnpm rebuild @nestjs/core bcrypt
 
 COPY --from=builder /app/dist ./dist
 
