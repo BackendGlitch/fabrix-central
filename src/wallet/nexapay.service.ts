@@ -11,7 +11,9 @@ export class NexaPayService {
   private readonly client: any;
 
   constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get('NEXAPAY_API_KEY') || 'nxp_developer_e6b2518bd4d795c16f709bcb_b535f3b0';
+    const apiKey =
+      this.configService.get('NEXAPAY_API_KEY') ||
+      'nxp_developer_aa603022e4a1083809825a91_7e7a8be1';
 
     this.client = new NexaPay({
       apiKey,
@@ -26,14 +28,22 @@ export class NexaPayService {
   async createPaymentIntent(
     amount: number, // Amount in TND (credits)
     description: string,
-  ): Promise<{ intent_id: string; client_secret: string; status: string; pay_url: string }> {
+  ): Promise<{
+    intent_id: string;
+    client_secret: string;
+    status: string;
+    pay_url: string;
+  }> {
     // Convert TND to millimes for NexaPay
     const amountInMillimes = Math.round(amount * 1000);
 
-    this.logger.log(`Creating payment intent: ${amount} TND (${amountInMillimes} millimes)`);
+    this.logger.log(
+      `Creating payment intent: ${amount} TND (${amountInMillimes} millimes)`,
+    );
 
     try {
-      const appUrl = this.configService.get('APP_URL') || 'http://localhost:3000';
+      const appUrl =
+        this.configService.get('APP_URL') || 'http://localhost:3000';
       const response = await this.client.paymentIntents.create({
         amount: amountInMillimes,
         currency: 'TND',
@@ -53,24 +63,41 @@ export class NexaPayService {
 
       const result = {
         intent_id: payment.intent_id || payment.intentId || payment.id,
-        client_secret: payment.client_secret || payment.clientSecret || payment.secret,
+        client_secret:
+          payment.client_secret || payment.clientSecret || payment.secret,
         status: payment.status || 'pending',
-        pay_url: payment.checkout_url || payment.pay_url || payment.payUrl || payment.url,
+        pay_url:
+          payment.checkout_url ||
+          payment.pay_url ||
+          payment.payUrl ||
+          payment.url,
       };
 
       this.logger.log(`[NexaPay] Mapped response: ${JSON.stringify(result)}`);
 
       return result;
     } catch (error: any) {
-      this.logger.error(`NexaPay createPaymentIntent error: ${error?.message || error}`, error);
-      throw new Error(`Failed to create payment intent: ${error?.message || error}`);
+      this.logger.error(
+        `NexaPay createPaymentIntent error: ${error?.message || error}`,
+        error,
+      );
+      throw new Error(
+        `Failed to create payment intent: ${error?.message || error}`,
+      );
     }
   }
 
   /**
    * Get payment intent status
    */
-  async getPaymentIntent(intentId: string): Promise<{ intent_id: string; amount: number; status: string; created_at: string }> {
+  async getPaymentIntent(
+    intentId: string,
+  ): Promise<{
+    intent_id: string;
+    amount: number;
+    status: string;
+    created_at: string;
+  }> {
     try {
       const payment = await this.client.paymentIntents.get(intentId);
 
@@ -81,8 +108,13 @@ export class NexaPayService {
         created_at: payment.createdAt || payment.created_at,
       };
     } catch (error: any) {
-      this.logger.error(`NexaPay getPaymentIntent error: ${error?.message || error}`, error);
-      throw new Error(`Failed to get payment intent: ${error?.message || error}`);
+      this.logger.error(
+        `NexaPay getPaymentIntent error: ${error?.message || error}`,
+        error,
+      );
+      throw new Error(
+        `Failed to get payment intent: ${error?.message || error}`,
+      );
     }
   }
 
@@ -104,8 +136,13 @@ export class NexaPayService {
         confirmed_at: result.confirmedAt || result.confirmed_at,
       };
     } catch (error: any) {
-      this.logger.error(`NexaPay confirmPaymentIntent error: ${error?.message || error}`, error);
-      throw new Error(`Failed to confirm payment intent: ${error?.message || error}`);
+      this.logger.error(
+        `NexaPay confirmPaymentIntent error: ${error?.message || error}`,
+        error,
+      );
+      throw new Error(
+        `Failed to confirm payment intent: ${error?.message || error}`,
+      );
     }
   }
 
@@ -129,7 +166,10 @@ export class NexaPayService {
         status: result.status,
       };
     } catch (error: any) {
-      this.logger.error(`NexaPay createRefund error: ${error?.message || error}`, error);
+      this.logger.error(
+        `NexaPay createRefund error: ${error?.message || error}`,
+        error,
+      );
       throw new Error(`Failed to create refund: ${error?.message || error}`);
     }
   }
@@ -152,7 +192,10 @@ export class NexaPayService {
         status: result.status,
       };
     } catch (error: any) {
-      this.logger.error(`NexaPay createPayout error: ${error?.message || error}`, error);
+      this.logger.error(
+        `NexaPay createPayout error: ${error?.message || error}`,
+        error,
+      );
       throw new Error(`Failed to create payout: ${error?.message || error}`);
     }
   }
