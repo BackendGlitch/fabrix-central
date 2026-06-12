@@ -1,50 +1,49 @@
-app = "fabrix-central"
+# fly.toml app configuration file generated for fabrix-central on 2026-06-12T12:02:21+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'fabrix-central'
+primary_region = 'cdg'
+
+[experimental]
+  auto_rollback = true
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
+
+[env]
+  AGENT_JWT_ACCESS_TTL = '15m'
+  AGENT_JWT_REFRESH_TTL = '30d'
+  AGENT_LOGIN_BASE_URL = 'https://fabrix.sbs/agent/auth'
+  API_URL = 'https://api.fabrix.sbs'
+  APP_URL = 'https://fabrix.sbs'
+  CORS_ORIGINS = 'https://fabrix.sbs,https://www.fabrix.sbs,https://api.fabrix.sbs'
+  NODE_ENV = 'production'
+  PORT = '4000'
 
 [[services]]
-  protocol = "tcp"
+  protocol = 'tcp'
   internal_port = 4000
 
   [[services.ports]]
     port = 443
-    handlers = ["tls", "http"]
+    handlers = ['tls', 'http']
+
   [[services.ports]]
     port = 80
-    handlers = ["http"]
+    handlers = ['http']
 
-  [services.http_checks]
-    interval = "15s"
-    grace_period = "30s"
-    method = "GET"
-    path = "/health"
-    protocol = "http"
-    timeout = "5s"
-
-[env]
-  PORT = "4000"
-  NODE_ENV = "production"
-  CORS_ORIGINS = "https://fabrix.sbs,https://www.fabrix.sbs,https://api.fabrix.sbs"
-  AGENT_JWT_ACCESS_TTL = "15m"
-  AGENT_JWT_REFRESH_TTL = "30d"
-  AGENT_LOGIN_BASE_URL = "https://fabrix.sbs/agent/auth"
-  APP_URL = "https://fabrix.sbs"
-  API_URL = "https://api.fabrix.sbs"
-
-# Secrets (set via fly secrets set):
-#   DATABASE_URL
-#   REDIS_URL
-#   JWT_ACCESS_SECRET
-#   JWT_REFRESH_SECRET
-#   AGENT_JWT_ACCESS_SECRET
-#   AGENT_JWT_REFRESH_SECRET
-#   NEXAPAY_API_KEY
-
-[experimental]
-  allowed_public_ports = []
-  auto_rollback = true
+  [[services.http_checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '30s'
+    method = 'GET'
+    path = '/health'
+    protocol = 'http'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
+  cpus = 1
+  memory_mb = 512
