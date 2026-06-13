@@ -44,11 +44,14 @@ export class NexaPayService {
     try {
       const appUrl =
         this.configService.get('APP_URL') || 'http://localhost:3000';
+      const apiUrl =
+        this.configService.get('API_URL') || 'https://api-fabrix-v2.backendglitch.com';
       const response = await this.client.paymentIntents.create({
         amount: amountInMillimes,
         currency: 'TND',
         description,
-        webhook: `${this.configService.get('API_URL') || 'http://localhost:4000'}/wallet/webhook`,
+        success_webhook_url: `${apiUrl}/wallet/webhook`,
+        failure_webhook_url: `${apiUrl}/wallet/webhook`,
         redirect_url: `${appUrl}/dashboard/wallet?intent_id={intent_id}&status={status}`,
       });
 
