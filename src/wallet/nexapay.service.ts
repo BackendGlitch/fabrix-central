@@ -52,7 +52,7 @@ export class NexaPayService {
         redirect_url: `${appUrl}/dashboard/wallet?intent_id={intent_id}&status={status}`,
       });
 
-      this.logger.log(`[NexaPay] Raw response: ${JSON.stringify(response)}`);
+      this.logger.log('[NexaPay] Raw response received');
 
       // SDK wraps in { success, data, error }
       const payment = response.data || response;
